@@ -102,7 +102,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="Use scrolling terminal output instead of TUI dashboard",
     )
     parser.add_argument(
-        "--tui-packets",
+        "-n", "--tui-packets",
         type=int,
         default=50,
         metavar="N",

@@ -22,10 +22,14 @@ from backend.models.apdu import (
     ERROR_CLASSES,
     OBJECT_TYPES,
     PDU_TYPES,
+    PROPERTY_IDENTIFIERS,
     REJECT_REASONS,
+    SEGMENTATION_VALUES,
     UNCONFIRMED_SERVICES,
     APDUMessage,
+    IAmFields,
     ObjectIdentifier,
+    WhoIsRange,
 )
 
 logger = logging.getLogger(__name__)
@@ -107,9 +111,12 @@ def _parse_confirmed_request(data: bytes) -> APDUMessage:
         max_apdu_length=max_apdu_raw,
     )
 
-    # Try to extract object identifier from service data
+    # Store and parse service data
     service_data = data[offset + 1 :]
+    if service_data:
+        msg.service_data_hex = service_data.hex()
     _try_extract_object_id(msg, service_data)
+    _try_extract_property_id(msg, service_data)
 
     return msg
 
@@ -135,9 +142,19 @@ def _parse_unconfirmed_request(data: bytes) -> APDUMessage:
         is_confirmed=False,
     )
 
-    # Try to extract object identifier from service data (e.g., I-Am has device object ID)
+    # Store service data payload
     service_data = data[2:]
+    if service_data:
+        msg.service_data_hex = service_data.hex()
+
+    # Extract object identifier from service data (e.g., I-Am has device object ID)
     _try_extract_object_id(msg, service_data)
+
+    # Service-specific decoding
+    if service_choice == 0:  # I-Am
+        _try_extract_iam_fields(msg, service_data)
+    elif service_choice == 8:  # Who-Is
+        _try_extract_whois_range(msg, service_data)
 
     return msg
 
@@ -215,9 +232,12 @@ def _parse_complex_ack(data: bytes) -> APDUMessage:
         window_size=window_size,
     )
 
-    # Try to extract object identifier from ACK service data
+    # Store and parse ACK service data
     service_data = data[offset + 1 :]
+    if service_data:
+        msg.service_data_hex = service_data.hex()
     _try_extract_object_id(msg, service_data)
+    _try_extract_property_id(msg, service_data)
 
     return msg
 
@@ -456,4 +476,219 @@ def _try_extract_error(msg: APDUMessage, error_data: bytes) -> None:
 
     except Exception:
         # Best-effort extraction
+        pass
+
+
+def _try_extract_property_id(msg: APDUMessage, service_data: bytes) -> None:
+    """Try to extract the property identifier from service data.
+
+    For ReadProperty/WriteProperty/ReadPropertyMultiple (services 12-16),
+    the property identifier follows the object identifier as context tag [1].
+
+    Layout after APDU header:
+      [0] Object Identifier (4 bytes, context tag 0)
+      [1] Property Identifier (1-4 bytes, context tag 1)
+      [2] Property Array Index (optional, context tag 2)
+    """
+    if not service_data or len(service_data) < 7:
+        return
+
+    # Only for services that have property identifiers
+    if msg.service_choice not in (12, 14, 15, 16):
+        return
+
+    try:
+        offset = 0
+
+        # Skip context tag [0] — object identifier (already parsed)
+        tag_byte = service_data[offset]
+        tag_number = tag_byte >> 4
+        tag_class = (tag_byte >> 3) & 0x01
+        if tag_class == 1 and tag_number == 0:
+            length_vt = tag_byte & 0x07
+            offset += 1 + length_vt
+        else:
+            return
+
+        if offset >= len(service_data):
+            return
+
+        # Context tag [1] — property identifier (enumerated, 1-4 bytes)
+        tag_byte = service_data[offset]
+        tag_number = tag_byte >> 4
+        tag_class = (tag_byte >> 3) & 0x01
+        if tag_class == 1 and tag_number == 1:
+            length_vt = tag_byte & 0x07
+            offset += 1
+            if length_vt > 0 and len(service_data) >= offset + length_vt:
+                prop_id = int.from_bytes(
+                    service_data[offset:offset + length_vt], "big"
+                )
+                msg.property_identifier = prop_id
+                msg.property_name = PROPERTY_IDENTIFIERS.get(
+                    prop_id, f"Proprietary-{prop_id}"
+                )
+                offset += length_vt
+
+        # Optional context tag [2] — property array index
+        if offset < len(service_data):
+            tag_byte = service_data[offset]
+            tag_number = tag_byte >> 4
+            tag_class = (tag_byte >> 3) & 0x01
+            if tag_class == 1 and tag_number == 2:
+                length_vt = tag_byte & 0x07
+                offset += 1
+                if length_vt > 0 and len(service_data) >= offset + length_vt:
+                    msg.property_array_index = int.from_bytes(
+                        service_data[offset:offset + length_vt], "big"
+                    )
+
+    except Exception:
+        pass
+
+
+def _try_extract_iam_fields(msg: APDUMessage, service_data: bytes) -> None:
+    """Try to extract I-Am service data fields.
+
+    I-Am PDU service data layout (all application-tagged):
+      - BACnetObjectIdentifier (tag 12, 4 bytes) — device object ID
+      - Unsigned (tag 2) — max APDU length accepted
+      - BACnetSegmentation (tag 9, 1 byte) — segmentation supported (enum 0-3)
+      - Unsigned (tag 2) — vendor ID
+    """
+    if not service_data or len(service_data) < 10:
+        return
+
+    try:
+        offset = 0
+
+        # 1) Object identifier (tag 12, 4 bytes) — already parsed by _try_extract_object_id
+        tag_byte = service_data[offset]
+        tag_number = (tag_byte >> 4) & 0x0F
+        if tag_number != 12:
+            return
+        length_vt = tag_byte & 0x07
+        offset += 1 + length_vt  # skip tag + value
+
+        # Extract device instance from the already-parsed object identifier
+        device_instance = 0
+        if msg.object_identifier:
+            device_instance = msg.object_identifier.instance
+
+        if offset >= len(service_data):
+            return
+
+        # 2) Max APDU length accepted (tag 2 = unsigned, variable length)
+        tag_byte = service_data[offset]
+        tag_number = (tag_byte >> 4) & 0x0F
+        if tag_number != 2:
+            return
+        length_vt = tag_byte & 0x07
+        offset += 1
+        if len(service_data) < offset + length_vt:
+            return
+        max_apdu = int.from_bytes(
+            service_data[offset:offset + length_vt], "big"
+        )
+        offset += length_vt
+
+        if offset >= len(service_data):
+            return
+
+        # 3) Segmentation supported (tag 9 = enumerated, 1 byte)
+        tag_byte = service_data[offset]
+        tag_number = (tag_byte >> 4) & 0x0F
+        if tag_number != 9:
+            return
+        length_vt = tag_byte & 0x07
+        offset += 1
+        if len(service_data) < offset + length_vt:
+            return
+        seg_value = int.from_bytes(
+            service_data[offset:offset + length_vt], "big"
+        )
+        seg_name = SEGMENTATION_VALUES.get(seg_value, f"Unknown-{seg_value}")
+        offset += length_vt
+
+        if offset >= len(service_data):
+            return
+
+        # 4) Vendor ID (tag 2 = unsigned, variable length)
+        tag_byte = service_data[offset]
+        tag_number = (tag_byte >> 4) & 0x0F
+        if tag_number != 2:
+            return
+        length_vt = tag_byte & 0x07
+        offset += 1
+        if len(service_data) < offset + length_vt:
+            return
+        vendor_id = int.from_bytes(
+            service_data[offset:offset + length_vt], "big"
+        )
+
+        msg.iam_fields = IAmFields(
+            device_instance=device_instance,
+            max_apdu_length=max_apdu,
+            segmentation_supported=seg_value,
+            segmentation_name=seg_name,
+            vendor_id=vendor_id,
+        )
+
+    except Exception:
+        pass
+
+
+def _try_extract_whois_range(msg: APDUMessage, service_data: bytes) -> None:
+    """Try to extract Who-Is device instance range limits.
+
+    Who-Is service data layout (context-tagged, optional):
+      [0] low-limit  — unsigned integer
+      [1] high-limit — unsigned integer
+
+    If no service data, it's a global Who-Is (no range limits).
+    """
+    if not service_data or len(service_data) < 4:
+        return
+
+    try:
+        offset = 0
+
+        # Context tag [0] — low limit
+        tag_byte = service_data[offset]
+        tag_number = tag_byte >> 4
+        tag_class = (tag_byte >> 3) & 0x01
+        if tag_class != 1 or tag_number != 0:
+            return
+        length_vt = tag_byte & 0x07
+        offset += 1
+        if len(service_data) < offset + length_vt:
+            return
+        low_limit = int.from_bytes(
+            service_data[offset:offset + length_vt], "big"
+        )
+        offset += length_vt
+
+        if offset >= len(service_data):
+            return
+
+        # Context tag [1] — high limit
+        tag_byte = service_data[offset]
+        tag_number = tag_byte >> 4
+        tag_class = (tag_byte >> 3) & 0x01
+        if tag_class != 1 or tag_number != 1:
+            return
+        length_vt = tag_byte & 0x07
+        offset += 1
+        if len(service_data) < offset + length_vt:
+            return
+        high_limit = int.from_bytes(
+            service_data[offset:offset + length_vt], "big"
+        )
+
+        msg.who_is_range = WhoIsRange(
+            low_limit=low_limit,
+            high_limit=high_limit,
+        )
+
+    except Exception:
         pass

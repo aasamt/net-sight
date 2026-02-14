@@ -142,6 +142,50 @@ OBJECT_TYPES: dict[int, str] = {
     56: "Network-Port",
 }
 
+# BACnet property identifiers (commonly seen in traffic)
+PROPERTY_IDENTIFIERS: dict[int, str] = {
+    8: "All",
+    28: "Description",
+    36: "Event-State",
+    46: "Max-APDU-Length-Accepted",
+    55: "Object-Identifier",
+    62: "Object-List",
+    70: "Object-Name",
+    75: "Object-Type",
+    76: "Optional",
+    77: "Out-Of-Service",
+    79: "Present-Value",
+    81: "Priority-Array",
+    85: "Present-Value",  # alias
+    87: "Priority-Array",  # alias
+    95: "Reliability",
+    96: "Relinquish-Default",
+    97: "Required",
+    103: "Segmentation-Supported",
+    104: "Setpoint-Reference",
+    107: "Status-Flags",
+    112: "System-Status",
+    120: "Vendor-Identifier",
+    121: "Vendor-Name",
+    139: "Protocol-Object-Types-Supported",
+    140: "Protocol-Services-Supported",
+    152: "Max-Segments-Accepted",
+    155: "Protocol-Version",
+    168: "Model-Name",
+    169: "Firmware-Revision",
+    170: "Application-Software-Version",
+    371: "Property-List",
+    512: "Database-Revision",
+}
+
+# BACnet segmentation support values (for I-Am)
+SEGMENTATION_VALUES: dict[int, str] = {
+    0: "Segmented-Both",
+    1: "Segmented-Transmit",
+    2: "Segmented-Receive",
+    3: "No-Segmentation",
+}
+
 
 class ObjectIdentifier(BaseModel):
     """BACnet object identifier (32-bit: 10-bit type + 22-bit instance)."""
@@ -149,6 +193,23 @@ class ObjectIdentifier(BaseModel):
     object_type: int
     object_type_name: str
     instance: int
+
+
+class IAmFields(BaseModel):
+    """Decoded I-Am service data fields."""
+
+    device_instance: int  # Device object instance from object ID
+    max_apdu_length: int  # Max APDU length accepted
+    segmentation_supported: int  # 0-3 segmentation code
+    segmentation_name: str  # Human-readable segmentation
+    vendor_id: int  # Vendor identifier
+
+
+class WhoIsRange(BaseModel):
+    """Decoded Who-Is service data fields (optional range)."""
+
+    low_limit: int  # Low device instance limit
+    high_limit: int  # High device instance limit
 
 
 class APDUMessage(BaseModel):
@@ -186,3 +247,15 @@ class APDUMessage(BaseModel):
 
     # Object identifier (extracted from service data when available)
     object_identifier: ObjectIdentifier | None = None
+
+    # Property identifier (ReadProperty, WriteProperty, etc.)
+    property_identifier: int | None = None
+    property_name: str | None = None
+    property_array_index: int | None = None  # Optional array index
+
+    # Service-specific decoded fields
+    iam_fields: IAmFields | None = None  # I-Am response data
+    who_is_range: WhoIsRange | None = None  # Who-Is request range
+
+    # Raw service data payload (hex string, after APDU header)
+    service_data_hex: str | None = None

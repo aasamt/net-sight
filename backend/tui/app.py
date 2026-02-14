@@ -21,7 +21,7 @@ from typing import TYPE_CHECKING
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
-from textual.widgets import Footer, Header, Label
+from textual.widgets import DataTable, Footer, Header, Label
 
 from backend.analysis.anomaly_detector import AnomalyDetector
 from backend.analysis.device_registry import DeviceRegistry
@@ -30,7 +30,14 @@ from backend.models.packet import ParsedPacket
 from backend.parsers.pipeline import parse_packet
 from backend.transport.base import RawPacket
 
-from .widgets import AnomalyLog, DevicePanel, PacketTable, StatsPanel, TopTalkersPanel
+from .widgets import (
+    AnomalyLog,
+    DevicePanel,
+    PacketDetailPanel,
+    PacketTable,
+    StatsPanel,
+    TopTalkersPanel,
+)
 
 if TYPE_CHECKING:
     from backend.transport.base import TransportCapture
@@ -76,8 +83,9 @@ class NetSightApp(App):
         self._traffic_stats = TrafficStats()
         self._anomaly_detector = AnomalyDetector()
 
-        # Packet storage for save
+        # Packet storage for save and detail lookup
         self._parsed_packets: list[ParsedPacket] = []
+        self._packets_by_id: dict[int, ParsedPacket] = {}
 
         # Async queue for thread-safe packet bridging
         self._queue: asyncio.Queue[RawPacket] = asyncio.Queue(maxsize=10_000)
@@ -103,7 +111,9 @@ class NetSightApp(App):
                 yield StatsPanel(id="stats-panel")
                 yield DevicePanel(id="device-panel")
                 yield TopTalkersPanel(id="top-talkers-panel")
-        yield AnomalyLog(id="anomaly-panel")
+        with Horizontal(id="bottom-container"):
+            yield PacketDetailPanel(id="detail-panel")
+            yield AnomalyLog(id="anomaly-panel")
         yield Footer()
 
     # ------------------------------------------------------------------
@@ -170,6 +180,7 @@ class NetSightApp(App):
             parsed = parse_packet(raw)
             self._packet_count += 1
             self._parsed_packets.append(parsed)
+            self._packets_by_id[parsed.id] = parsed
 
             # Feed analysis engines
             self._device_registry.process_packet(parsed)
@@ -185,15 +196,27 @@ class NetSightApp(App):
             elif parsed.bvlc:
                 service = parsed.bvlc.function_name
 
-            bvlc_fn = parsed.bvlc.function_name if parsed.bvlc else "Unknown"
+            pdu_type = ""
+            if parsed.apdu:
+                pdu_type = parsed.apdu.pdu_type_name
+            elif parsed.npdu and parsed.npdu.is_network_message:
+                pdu_type = "Network"
+            elif parsed.bvlc:
+                pdu_type = parsed.bvlc.function_name
+
+            obj_str = ""
+            if parsed.apdu and parsed.apdu.object_identifier:
+                oid = parsed.apdu.object_identifier
+                obj_str = f"{oid.object_type_name}-{oid.instance}"
 
             packet_table = self.query_one("#packet-panel", PacketTable)
             packet_table.add_packet(
                 parsed.id,
                 parsed.effective_source_ip,
                 parsed.destination_ip,
-                bvlc_fn,
+                pdu_type,
                 service,
+                obj_str,
                 parsed.length,
             )
 
@@ -208,6 +231,31 @@ class NetSightApp(App):
             # Auto-save if path given
             if self._save_path:
                 self._save_packet_jsonl(parsed)
+
+    # ------------------------------------------------------------------
+    # Packet selection → detail panel
+    # ------------------------------------------------------------------
+
+    def on_data_table_row_highlighted(
+        self, event: DataTable.RowHighlighted
+    ) -> None:
+        """When user moves cursor on a packet row, show its decoded detail."""
+        table = self.query_one("#packet-table", DataTable)
+        try:
+            row_data = table.get_row(event.row_key)
+        except Exception:  # noqa: BLE001
+            return
+
+        # First column is the packet ID string
+        try:
+            packet_id = int(row_data[0])
+        except (ValueError, IndexError):
+            return
+
+        packet = self._packets_by_id.get(packet_id)
+        if packet:
+            detail_panel = self.query_one("#detail-panel", PacketDetailPanel)
+            detail_panel.show_packet(packet)
 
     def _save_packet_jsonl(self, parsed: ParsedPacket) -> None:
         """Append a single parsed packet to the JSONL file."""

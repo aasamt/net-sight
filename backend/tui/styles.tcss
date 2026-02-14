@@ -1,6 +1,6 @@
 /* NetSight TUI — Textual CSS stylesheet
  *
- * Layout: Header → Main (PacketTable left | right stack) → AnomalyLog → Footer
+ * Layout: Header → Main (PacketTable left | right stack) → Bottom (Detail left | Anomaly right) → Footer
  * Right stack: StatsPanel, DevicePanel, TopTalkersPanel
  */
 
@@ -11,7 +11,7 @@ Screen {
 /* ---------- Main content area ---------- */
 #main-container {
     layout: horizontal;
-    height: 1fr;
+    height: 2fr;
 }
 
 /* Left panel: recent packets table */
@@ -29,6 +29,15 @@ Screen {
     text-style: bold;
     content-align: center middle;
     padding: 0 1;
+}
+
+#packet-filter {
+    dock: top;
+    height: 1;
+    margin: 0;
+    padding: 0 1;
+    border: none;
+    background: $surface;
 }
 
 /* Right side stack */
@@ -54,11 +63,60 @@ Screen {
     border: solid $secondary;
 }
 
-/* ---------- Bottom anomaly log ---------- */
+/* ---------- Bottom container ---------- */
+#bottom-container {
+    layout: horizontal;
+    height: 1fr;
+    min-height: 12;
+}
+
+/* Bottom-left: packet detail panel */
+#detail-panel {
+    width: 2fr;
+    height: 100%;
+    border: solid $primary;
+}
+
+#detail-panel .panel-title {
+    dock: top;
+    height: 1;
+    background: $primary;
+    color: $text;
+    text-style: bold;
+    padding: 0 1;
+}
+
+#detail-scroll {
+    height: 100%;
+    width: 1fr;
+    scrollbar-size: 1 1;
+}
+
+#detail-split {
+    layout: horizontal;
+    height: 100%;
+}
+
+#hex-scroll {
+    height: 100%;
+    width: 1fr;
+    border-left: solid $surface;
+    scrollbar-size: 1 1;
+}
+
+#hex-content {
+    width: 100%;
+}
+
+#detail-content {
+    width: 100%;
+}
+
+/* Bottom-right: anomaly log */
 #anomaly-panel {
-    height: 8;
+    width: 1fr;
+    height: 100%;
     border: solid $warning;
-    dock: bottom;
 }
 
 /* ---------- Panel titles ---------- */
