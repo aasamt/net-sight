@@ -1,7 +1,7 @@
 # NetSight — Session Progress & Handoff
 
-> **Last Updated:** February 12, 2026
-> **Status:** Phase 5b Complete — TUI Dashboard Operational (160 tests passing)
+> **Last Updated:** February 13, 2026
+> **Status:** Phase 5c Complete — TUI Enhanced with Packet Detail, Filtering & Model Extensions (160 tests passing)
 
 ---
 
@@ -173,6 +173,46 @@ After reading these files, tell me what has been completed and what the next imp
 - [x] 30 TUI tests covering: CLI flags, widget init, app lifecycle, Textual Pilot headless tests, keyboard bindings, plain mode compatibility
 
 **Requirement coverage:** NFR-USA-03, NFR-USA-04 (partial — terminal UI)
+
+---
+
+### Phase 5c: TUI Enhancements — Packet Detail, Filtering & Model Extensions
+- [x] Add `PacketDetailPanel` widget with horizontal split layout
+  - Left side: decoded APDU detail (PDU type, service, invoke ID, object, property, I-Am/Who-Is fields)
+  - Right side: raw hex dump (no ASCII), BVLC summary, NPDU summary
+  - Wired to `on_data_table_row_highlighted` for row selection → detail update
+  - O(1) packet lookup via `_packets_by_id` dict keyed by row index
+- [x] Add live filter input to `PacketTable`
+  - `Input` widget docked at top of packet table section
+  - Filters across all columns (source, destination, PDU type, service, object)
+  - Stores all rows in `_all_rows` deque, rebuilds DataTable on filter change
+  - `_matches_filter()` for case-insensitive substring matching
+- [x] Replace BVLC column with PDU Type column
+  - Shows human-readable PDU type name (e.g., "Confirmed-REQ", "Unconfirmed-REQ", "Complex-ACK")
+- [x] Add Object column with friendly format
+  - Displays object type + instance (e.g., "Device-201", "AnalogInput-1")
+  - Falls back to raw identifier if type not mappable
+- [x] Extend APDU models with richer decode fields
+  - `property_identifier`, `property_name` — decoded from context tag [1] for ReadProperty/WriteProperty services
+  - `property_array_index` — optional array index
+  - `iam_fields: IAmFields` — device_instance, max_apdu_length, segmentation_supported/name, vendor_id
+  - `who_is_range: WhoIsRange` — low_limit, high_limit
+  - `service_data_hex` — raw hex of service-specific payload
+  - `PROPERTY_IDENTIFIERS` dict (~30 common BACnet properties)
+  - `SEGMENTATION_VALUES` dict for segmentation decode
+- [x] Extend APDU parser with new extraction functions
+  - `_try_extract_property_id()` — extracts property identifier from context tag [1] for services 12-16
+  - `_try_extract_iam_fields()` — extracts 4 application-tagged values from I-Am responses
+  - `_try_extract_whois_range()` — extracts context-tagged range limits from Who-Is requests
+  - All confirmed/unconfirmed/complex-ACK parsers now store `service_data_hex`
+- [x] Layout refinements
+  - Bottom container: `PacketDetailPanel` (2fr left) + `AnomalyLog` (1fr right)
+  - `AnomalyLog` now 100% height, shows 15 entries
+  - Hex dump without ASCII column for cleaner display
+  - `#detail-split` horizontal layout for decoded vs raw sections
+  - `#packet-filter` styled as 1-line docked input
+
+**Requirement coverage:** FR-INS-05 (packet detail), FR-PAR-01 through FR-PAR-11 (enriched parsing), NFR-USA-03, NFR-USA-04
 
 ---
 
@@ -354,6 +394,7 @@ After reading these files, tell me what has been completed and what the next imp
 | 2026-02-12 | Phase 4 complete — Analysis engine (device registry, traffic stats, anomaly detector, packet inspector), 39 test cases passing |
 | 2026-02-12 | Phase 5 complete — CLI entry point with argparse, async pipeline, terminal output, JSONL save, 35 test cases passing |
 | 2026-02-12 | Phase 5b complete — Textual TUI dashboard (top-style fixed panels), --plain/--tui-packets flags, 30 test cases, 160 total passing |
+| 2026-02-13 | Phase 5c complete — PacketDetailPanel, live filter, PDU Type/Object columns, APDU model extensions (I-Am, Who-Is, property ID), parser enrichment, layout refinements |
 
 ---
 
