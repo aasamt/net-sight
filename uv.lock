@@ -186,7 +186,7 @@ wheels = [
 ]
 
 [[package]]
-name = "netsight-backend"
+name = "net-sight-backend"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [

@@ -1,5 +1,5 @@
 [project]
-name = "netsight-backend"
+name = "net-sight-backend"
 version = "0.1.0"
 description = "BACnet/IP network traffic analyzer — capture, parse, and analyze backend"
 requires-python = ">=3.12"
