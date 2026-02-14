@@ -1,0 +1,16 @@
+Metadata-Version: 2.4
+Name: netsight-backend
+Version: 0.1.0
+Summary: BACnet/IP network traffic analyzer — capture, parse, and analyze backend
+Requires-Python: >=3.12
+Requires-Dist: fastapi>=0.115.0
+Requires-Dist: uvicorn[standard]>=0.34.0
+Requires-Dist: scapy>=2.6.0
+Requires-Dist: bacpypes3>=0.0.99
+Requires-Dist: pydantic>=2.10.0
+Requires-Dist: websockets>=14.0
+Requires-Dist: textual>=0.40.0
+Provides-Extra: dev
+Requires-Dist: pytest>=8.0; extra == "dev"
+Requires-Dist: pytest-asyncio>=0.24.0; extra == "dev"
+Requires-Dist: ruff>=0.8.0; extra == "dev"

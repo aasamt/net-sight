@@ -1,0 +1,122 @@
+/* NetSight TUI — Textual CSS stylesheet
+ *
+ * Layout: Header → Main (PacketTable left | right stack) → AnomalyLog → Footer
+ * Right stack: StatsPanel, DevicePanel, TopTalkersPanel
+ */
+
+Screen {
+    layout: vertical;
+}
+
+/* ---------- Main content area ---------- */
+#main-container {
+    layout: horizontal;
+    height: 1fr;
+}
+
+/* Left panel: recent packets table */
+#packet-panel {
+    width: 2fr;
+    height: 100%;
+    border: solid $accent;
+}
+
+#packet-panel .panel-title {
+    dock: top;
+    height: 1;
+    background: $accent;
+    color: $text;
+    text-style: bold;
+    content-align: center middle;
+    padding: 0 1;
+}
+
+/* Right side stack */
+#right-stack {
+    layout: vertical;
+    width: 1fr;
+    height: 100%;
+}
+
+/* ---------- Right-side panels ---------- */
+#stats-panel {
+    height: 1fr;
+    border: solid $secondary;
+}
+
+#device-panel {
+    height: 1fr;
+    border: solid $secondary;
+}
+
+#top-talkers-panel {
+    height: 1fr;
+    border: solid $secondary;
+}
+
+/* ---------- Bottom anomaly log ---------- */
+#anomaly-panel {
+    height: 8;
+    border: solid $warning;
+    dock: bottom;
+}
+
+/* ---------- Panel titles ---------- */
+.panel-title {
+    dock: top;
+    height: 1;
+    background: $surface;
+    color: $text;
+    text-style: bold;
+    padding: 0 1;
+}
+
+/* ---------- Panel content ---------- */
+.panel-content {
+    padding: 0 1;
+    overflow-y: auto;
+}
+
+/* ---------- DataTable styling ---------- */
+DataTable {
+    height: 100%;
+}
+
+DataTable > .datatable--header {
+    text-style: bold;
+    background: $surface;
+}
+
+DataTable > .datatable--cursor {
+    background: $accent 40%;
+}
+
+/* ---------- Status indicators ---------- */
+.status-live {
+    color: $success;
+    text-style: bold;
+}
+
+.status-paused {
+    color: $warning;
+    text-style: bold;
+}
+
+.status-complete {
+    color: $primary;
+    text-style: bold;
+}
+
+/* ---------- Anomaly severity colors ---------- */
+.severity-warning {
+    color: $warning;
+}
+
+.severity-critical {
+    color: $error;
+    text-style: bold;
+}
+
+.severity-info {
+    color: $primary;
+}
