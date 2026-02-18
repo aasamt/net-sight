@@ -4,7 +4,8 @@ Widgets:
     PacketTable        — DataTable showing recent parsed packets (ring buffer)
     PacketDetailPanel  — Decoded packet detail view (raw hex + layer breakdown)
     StatsPanel         — Global traffic statistics
-    DevicePanel        — Discovered BACnet devices
+    DevicePanel        — Discovered BACnet devices (compact, right panel)
+    DeviceListPanel    — Full device list tab with DataTable (IP, device ID, details)
     TopTalkersPanel    — Top source IPs by packet count
     AnomalyLog         — Recent anomaly alerts
 """
@@ -437,6 +438,124 @@ class TopTalkersPanel(Static):
 
         content = self.query_one("#talkers-content", Label)
         content.update("\n".join(lines))
+
+
+# ---------------------------------------------------------------------------
+# Device List Panel (devices tab — full DataTable)
+# ---------------------------------------------------------------------------
+
+class DeviceListPanel(Static):
+    """Full device list with DataTable showing every unique IP and its BACnet device/object ID.
+
+    Displayed in the "Devices" tab. Updated at 1 Hz from the DeviceRegistry.
+    Also includes IPs seen in traffic that have not sent I-Am (shown as unknown device).
+    """
+
+    DEFAULT_CSS = """
+    DeviceListPanel {
+        height: 100%;
+    }
+    """
+
+    def __init__(self, **kwargs: object) -> None:
+        super().__init__(**kwargs)
+        self._known_ips: set[str] = set()
+
+    def compose(self) -> ComposeResult:
+        yield Label(" BACnet Devices", classes="panel-title")
+        yield Label(
+            "  Discovered devices will appear here as traffic is captured.",
+            id="device-list-summary",
+        )
+        table = DataTable(id="device-list-table")
+        table.cursor_type = "row"
+        table.zebra_stripes = True
+        yield table
+
+    def on_mount(self) -> None:
+        table = self.query_one("#device-list-table", DataTable)
+        table.add_columns(
+            "IP Address",
+            "Device ID",
+            "Object Type",
+            "Vendor ID",
+            "Packets",
+            "Bytes",
+            "First Seen",
+            "Last Seen",
+        )
+
+    def update_device_list(
+        self,
+        devices: list[object],
+        ip_to_instance: dict[str, int],
+        all_seen_ips: list[str] | None = None,
+    ) -> None:
+        """Rebuild the device table from the current registry state.
+
+        Args:
+            devices: List of DeviceEntry objects from DeviceRegistry.
+            ip_to_instance: IP→instance mapping for known devices.
+            all_seen_ips: Optional list of all IPs seen in traffic
+                (from TrafficStats top talkers or per-source tracking).
+        """
+        table = self.query_one("#device-list-table", DataTable)
+        table.clear()
+
+        # Build device-by-IP lookup
+        dev_by_ip: dict[str, object] = {}
+        for dev in devices:
+            dev_by_ip[dev.ip] = dev
+
+        # Collect all IPs: known devices + any extra seen IPs
+        all_ips: set[str] = set(dev_by_ip.keys())
+        if all_seen_ips:
+            all_ips.update(all_seen_ips)
+
+        # Sort: known devices first (by instance), then unknown IPs
+        known = sorted(
+            [(ip, dev_by_ip[ip]) for ip in all_ips if ip in dev_by_ip],
+            key=lambda item: item[1].instance,
+        )
+        unknown = sorted(ip for ip in all_ips if ip not in dev_by_ip)
+
+        row_count = 0
+        for ip, dev in known:
+            import datetime as _dt
+
+            first = _dt.datetime.fromtimestamp(
+                dev.first_seen, tz=_dt.timezone.utc
+            ).strftime("%H:%M:%S") if dev.first_seen else "—"
+            last = _dt.datetime.fromtimestamp(
+                dev.last_seen, tz=_dt.timezone.utc
+            ).strftime("%H:%M:%S") if dev.last_seen else "—"
+
+            table.add_row(
+                ip,
+                str(dev.instance),
+                dev.object_type_name,
+                str(dev.vendor_id) if dev.vendor_id is not None else "—",
+                str(dev.packet_count),
+                str(dev.byte_count),
+                first,
+                last,
+            )
+            row_count += 1
+
+        for ip in unknown:
+            table.add_row(ip, "—", "—", "—", "—", "—", "—", "—")
+            row_count += 1
+
+        # Update summary label
+        n_known = len(known)
+        n_unknown = len(unknown)
+        summary_parts = [f"  Total IPs: {row_count}"]
+        if n_known:
+            summary_parts.append(f"Identified devices: {n_known}")
+        if n_unknown:
+            summary_parts.append(f"Unknown IPs: {n_unknown}")
+        summary = self.query_one("#device-list-summary", Label)
+        summary.update("  |  ".join(summary_parts))
 
 
 # ---------------------------------------------------------------------------

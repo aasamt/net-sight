@@ -156,6 +156,11 @@ class DeviceRegistry:
         with self._lock:
             return list(self._devices.values())
 
+    def get_ip_to_instance(self) -> dict[str, int]:
+        """Get a copy of the IP-to-device-instance mapping."""
+        with self._lock:
+            return dict(self._ip_to_instance)
+
     def get_device_count(self) -> int:
         """Get the number of known devices."""
         with self._lock:

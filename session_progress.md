@@ -1,7 +1,7 @@
 # NetSight — Session Progress & Handoff
 
-> **Last Updated:** February 13, 2026
-> **Status:** Phase 5c Complete — TUI Enhanced with Packet Detail, Filtering & Model Extensions (160 tests passing)
+> **Last Updated:** February 17, 2026
+> **Status:** Phase 5d Complete — TUI Tabbed Interface with Devices Tab (160 tests passing)
 
 ---
 
@@ -154,11 +154,12 @@ After reading these files, tell me what has been completed and what the next imp
 - [x] Create `backend/tui/widgets.py`
   - `PacketTable` — DataTable with configurable ring buffer (default 50 rows)
   - `StatsPanel` — Global traffic statistics (packets, bytes, rates, confirmed/unconfirmed)
-  - `DevicePanel` — Discovered BACnet devices list (max 10 shown)
+  - `DevicePanel` — Discovered BACnet devices list (max 10 shown, compact right panel)
   - `TopTalkersPanel` — Top 5 source IPs by packet count
   - `AnomalyLog` — Scrolling anomaly alert log (bottom dock)
+  - `DeviceListPanel` — Full device list DataTable (added in Phase 5d)
 - [x] Create `backend/tui/app.py` — `NetSightApp(App)`
-  - `compose()` layout: Header → status bar → Horizontal(PacketTable | Vertical(Stats, Devices, TopTalkers)) → AnomalyLog → Footer
+  - `compose()` layout: Header → status bar → TabbedContent(Traffic tab, Devices tab) → Footer
   - `on_mount()` wires transport → async queue → consumer task → analysis engines → UI panels
   - 1Hz `set_interval` for stats/devices/top talkers panel refresh
   - Event-driven packet table updates (per-packet)
@@ -213,6 +214,28 @@ After reading these files, tell me what has been completed and what the next imp
   - `#packet-filter` styled as 1-line docked input
 
 **Requirement coverage:** FR-INS-05 (packet detail), FR-PAR-01 through FR-PAR-11 (enriched parsing), NFR-USA-03, NFR-USA-04
+
+---
+
+### Phase 5d: TUI Tabbed Interface — Devices Tab
+- [x] Refactor TUI layout to use Textual `TabbedContent` with `TabPane` widgets
+  - **Traffic tab** — existing dashboard (packet table, stats, devices, top talkers, detail panel, anomaly log)
+  - **Devices tab** — new full-screen `DeviceListPanel` with sortable DataTable
+- [x] Add `DeviceListPanel` widget to `backend/tui/widgets.py`
+  - DataTable columns: IP Address, Device ID, Object Type, Vendor ID, Packets, Bytes, First Seen, Last Seen
+  - Known devices (from I-Am discovery) shown with full details, sorted by instance
+  - Unknown IPs (seen in traffic but no I-Am) shown with "—" placeholders
+  - Summary label showing total IPs, identified devices, unknown IPs counts
+  - Refreshes at 1 Hz alongside other panels
+- [x] Add helper methods to analysis engines
+  - `DeviceRegistry.get_ip_to_instance()` — returns IP→device-instance mapping
+  - `TrafficStats.get_all_source_ips()` — returns all unique source IPs seen in traffic
+- [x] Add tab-related CSS styles to `backend/tui/styles.tcss`
+  - `TabbedContent`, `TabPane`, `DeviceListPanel`, `#device-list-table`, `#device-list-summary`
+- [x] Wire `DeviceListPanel` refresh into `_refresh_panels()` (1 Hz cycle)
+- [x] All 160 existing tests pass — no regressions
+
+**Requirement coverage:** FR-DEV-01 through FR-DEV-07 (device tracking/display), NFR-USA-03, NFR-USA-04
 
 ---
 
@@ -362,6 +385,7 @@ After reading these files, tell me what has been completed and what the next imp
 | 11 | 2026-02-12 | Backend-first / CLI-first implementation order | Full-stack per phase | Validate core capture+parse+analysis pipeline from terminal before adding UI layers; `--serve` flag enables FastAPI when needed |
 | 12 | 2026-02-12 | Manual byte-level parsers as primary (not BACpypes3 decode_packet) | BACpypes3 primary + manual fallback | Full control over all 12 BVLC functions, 20 network message types, 8 PDU types; BACpypes3 can be added later for deeper ASN.1 service data enrichment |
 | 13 | 2026-02-12 | Textual TUI as default CLI output (not scrolling terminal) | Rich Live+Layout, curses, urwid, blessed | Asyncio-native, CSS layout, DataTable widget, keyboard nav, built-in testing (Pilot); `--plain` preserves old behavior for scripting/CI |
+| 14 | 2026-02-17 | TabbedContent for multi-view TUI (not single-page scroll) | Multiple apps, screen switching, manual tab bar | Textual built-in TabbedContent/TabPane — zero custom plumbing, keyboard-navigable, auto-styled; separate concerns (traffic monitoring vs device inventory) into distinct views |
 
 ---
 
@@ -395,6 +419,7 @@ After reading these files, tell me what has been completed and what the next imp
 | 2026-02-12 | Phase 5 complete — CLI entry point with argparse, async pipeline, terminal output, JSONL save, 35 test cases passing |
 | 2026-02-12 | Phase 5b complete — Textual TUI dashboard (top-style fixed panels), --plain/--tui-packets flags, 30 test cases, 160 total passing |
 | 2026-02-13 | Phase 5c complete — PacketDetailPanel, live filter, PDU Type/Object columns, APDU model extensions (I-Am, Who-Is, property ID), parser enrichment, layout refinements |
+| 2026-02-17 | Phase 5d complete — TUI tabbed interface with TabbedContent; Devices tab with full DeviceListPanel DataTable (IP, device ID, object type, vendor, traffic stats, timestamps) |
 
 ---
 

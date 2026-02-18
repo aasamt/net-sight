@@ -21,7 +21,7 @@ from typing import TYPE_CHECKING
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
-from textual.widgets import DataTable, Footer, Header, Label
+from textual.widgets import DataTable, Footer, Header, Label, TabbedContent, TabPane
 
 from backend.analysis.anomaly_detector import AnomalyDetector
 from backend.analysis.device_registry import DeviceRegistry
@@ -32,6 +32,7 @@ from backend.transport.base import RawPacket
 
 from .widgets import (
     AnomalyLog,
+    DeviceListPanel,
     DevicePanel,
     PacketDetailPanel,
     PacketTable,
@@ -105,15 +106,19 @@ class NetSightApp(App):
             f" {mode}: {self._source_name}  |  Packets: 0  |  Press Q to quit",
             id="status-bar",
         )
-        with Horizontal(id="main-container"):
-            yield PacketTable(max_rows=self._max_rows, id="packet-panel")
-            with Vertical(id="right-stack"):
-                yield StatsPanel(id="stats-panel")
-                yield DevicePanel(id="device-panel")
-                yield TopTalkersPanel(id="top-talkers-panel")
-        with Horizontal(id="bottom-container"):
-            yield PacketDetailPanel(id="detail-panel")
-            yield AnomalyLog(id="anomaly-panel")
+        with TabbedContent(id="tabs"):
+            with TabPane("Traffic", id="tab-traffic"):
+                with Horizontal(id="main-container"):
+                    yield PacketTable(max_rows=self._max_rows, id="packet-panel")
+                    with Vertical(id="right-stack"):
+                        yield StatsPanel(id="stats-panel")
+                        yield DevicePanel(id="device-panel")
+                        yield TopTalkersPanel(id="top-talkers-panel")
+                with Horizontal(id="bottom-container"):
+                    yield PacketDetailPanel(id="detail-panel")
+                    yield AnomalyLog(id="anomaly-panel")
+            with TabPane("Devices", id="tab-devices"):
+                yield DeviceListPanel(id="device-list-panel")
         yield Footer()
 
     # ------------------------------------------------------------------
@@ -294,10 +299,16 @@ class NetSightApp(App):
             queue_drops=self._dropped_count,
         )
 
-        # Devices
+        # Devices (compact panel in right stack)
         devices = self._device_registry.get_all_devices()
         device_panel = self.query_one("#device-panel", DevicePanel)
         device_panel.update_devices(devices)
+
+        # Device list tab (full DataTable)
+        ip_to_instance = self._device_registry.get_ip_to_instance()
+        all_seen_ips = self._traffic_stats.get_all_source_ips()
+        device_list = self.query_one("#device-list-panel", DeviceListPanel)
+        device_list.update_device_list(devices, ip_to_instance, all_seen_ips)
 
         # Top talkers
         talkers = self._traffic_stats.get_top_talkers(5)

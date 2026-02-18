@@ -1,7 +1,8 @@
 /* NetSight TUI — Textual CSS stylesheet
  *
- * Layout: Header → Main (PacketTable left | right stack) → Bottom (Detail left | Anomaly right) → Footer
- * Right stack: StatsPanel, DevicePanel, TopTalkersPanel
+ * Layout: Header → TabbedContent(Traffic tab, Devices tab) → Footer
+ * Traffic tab: Main (PacketTable left | right stack) + Bottom (Detail left | Anomaly right)
+ * Devices tab: DeviceListPanel (full DataTable)
  */
 
 Screen {
@@ -147,6 +148,57 @@ DataTable > .datatable--header {
 
 DataTable > .datatable--cursor {
     background: $accent 40%;
+}
+
+/* ---------- Status indicators ---------- */
+
+/* ---------- Tabbed content ---------- */
+#tabs {
+    height: 1fr;
+}
+
+ContentSwitcher {
+    height: 1fr;
+}
+
+TabPane {
+    padding: 0;
+    height: 1fr;
+}
+
+#tab-traffic {
+    layout: vertical;
+}
+
+#tab-devices {
+    layout: vertical;
+}
+
+/* ---------- Device List Panel (devices tab) ---------- */
+#device-list-panel {
+    height: 100%;
+    border: solid $accent;
+}
+
+#device-list-panel .panel-title {
+    dock: top;
+    height: 1;
+    background: $accent;
+    color: $text;
+    text-style: bold;
+    padding: 0 1;
+}
+
+#device-list-summary {
+    dock: top;
+    height: 1;
+    background: $surface;
+    color: $text;
+    padding: 0 1;
+}
+
+#device-list-table {
+    height: 100%;
 }
 
 /* ---------- Status indicators ---------- */

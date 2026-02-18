@@ -201,6 +201,11 @@ class TrafficStats:
                 for d in sorted_ips[:n]
             ]
 
+    def get_all_source_ips(self) -> list[str]:
+        """Get all unique source IPs seen in traffic."""
+        with self._lock:
+            return list(self._by_source_ip.keys())
+
     def get_service_breakdown(self) -> list[dict]:
         """Get packet counts broken down by APDU service type."""
         with self._lock:

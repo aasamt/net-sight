@@ -43,7 +43,7 @@ backend/                     # Python 3.12+, FastAPI
   analysis/                  # device_registry, traffic_stats, anomaly_detector, packet_inspector
   tui/                       # Textual TUI dashboard (top-style fixed panels)
     app.py                   # NetSightApp(App) — main TUI application
-    widgets.py               # PacketTable, StatsPanel, DevicePanel, AnomalyLog widgets
+    widgets.py               # PacketTable, StatsPanel, DevicePanel, DeviceListPanel, AnomalyLog widgets
     styles.tcss              # Textual CSS for panel layout and colors
   api/                       # capture, analysis, export REST + ws WebSocket endpoints (--serve mode)
   tests/                     # Parser and analysis unit tests
@@ -78,7 +78,7 @@ electron/                    # main.ts (spawn Python), preload.ts (IPC bridge) (
 | `scapy` | Packet capture (AsyncSniffer), NO built-in BACnet layer |
 | `bacpypes3` | BACnet protocol decode (BVLC, NPDU, APDU) |
 | `pydantic` | Data models and validation |
-| `textual` | TUI dashboard — top-style fixed panels with DataTable, keyboard nav |
+| `textual` | TUI dashboard — tabbed interface (Traffic + Devices tabs), DataTable, TabbedContent, keyboard nav |
 
 ## Platform-Specific Concerns
 
