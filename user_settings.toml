@@ -1,0 +1,66 @@
+# ────────────────────────────────────────────────────────────────────
+# NetSight — User Settings
+# ────────────────────────────────────────────────────────────────────
+# Your customized thresholds and parameters.
+# Edit this file or use the TUI Settings tab to tune anomaly detection.
+#
+# All rate thresholds are in packets-per-second (pps).
+# Time values are in seconds.
+#
+# To restore defaults, use the TUI Settings tab "Reset to Defaults"
+# button, which copies default_settings.toml into this file.
+# ────────────────────────────────────────────────────────────────────
+
+[anomaly_detection]
+
+# ── General ───────────────────────────────────────────────────
+
+# Sliding window duration for all rate calculations (seconds).
+window_seconds = 10.0
+
+# Minimum time between repeated alerts of the same type (seconds).
+# # Prevents alert fatigue during sustained events.
+cooldown_seconds = 30.0
+
+# Maximum number of anomaly records to keep in memory.
+max_anomalies = 500
+
+
+# ── Chatty Device ─────────────────────────────────────────────
+
+# Per-source-IP packets/sec threshold. A single device exceeding this
+# # rate is flagged as "chatty."
+# default: 50.0
+chatty_pps = 5000.0
+
+
+# ── Broadcast Storm ───────────────────────────────────────────
+
+# Discovery flood: Who-Is, I-Am, Who-Has, I-Have (pps).
+# default: 30.0
+broadcast_pps = 3000.0
+
+# TimeSynchronization / UTC-TimeSynchronization flood (pps).
+# default: 10.0
+timesync_pps = 1000.0
+
+# UnconfirmedCOVNotification / WriteGroup flood (pps).
+# default: 30.0
+unconfirmed_flood_pps = 3000.0
+
+# Router discovery flood: Who-Is-Router / I-Am-Router (pps).
+# default: 20.0
+router_discovery_pps = 2000.0
+
+
+# ── Error / Reject / Abort Rates ──────────────────────────────
+
+# Aggregate error PDU rate (BACnet-Error responses, pps).
+# default: 10.0
+error_pps = 1000.0
+
+# Aggregate reject PDU rate (BACnet-Reject responses, pps).
+reject_pps = 5.0
+
+# Aggregate abort PDU rate (BACnet-Abort responses, pps).
+abort_pps = 5.0

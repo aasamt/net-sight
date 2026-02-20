@@ -106,8 +106,9 @@ NetSight is a cross-platform desktop application that passively captures BACnet/
 | FR-ANO-04 | Detect network congestion (overall traffic rate exceeding threshold) | P1 |
 | FR-ANO-05 | Detect routing issues (Reject-Message-To-Network occurrences) | P1 |
 | FR-ANO-06 | Detect foreign device registration failures (BVLC NAKs) | P1 |
-| FR-ANO-07 | Allow user-configurable thresholds for anomaly detection | P1 |
+| FR-ANO-07 | Allow user-configurable thresholds for anomaly detection via `user_settings.toml` and TUI Settings tab | P0 |
 | FR-ANO-08 | Display anomalies with severity level, device, description, timestamp | P0 |
+| FR-ANO-09 | Detect duplicate BACnet device IDs (same instance number from multiple IPs) | P0 |
 
 ### 4.6 Packet Inspection
 
@@ -282,6 +283,7 @@ Scapy AsyncSniffer (capture thread)
 bacnet_monitor/
 ├── backend/
 │   ├── main.py                    # FastAPI entry point (uvicorn)
+│   ├── settings.py                # Settings loader/writer (TOML ↔ AnomalySettings)
 │   ├── pyproject.toml             # Python dependencies
 │   ├── transport/
 │   │   ├── __init__.py
@@ -309,6 +311,8 @@ bacnet_monitor/
 │   └── tests/
 │       ├── test_parsers.py        # Parser unit tests
 │       ├── test_analysis.py       # Analysis unit tests
+│       ├── test_settings.py       # Settings loader/writer tests
+│       ├── test_tui.py            # TUI dashboard tests
 │       └── fixtures/              # Test pcap files
 ├── frontend/
 │   ├── package.json
@@ -370,6 +374,8 @@ bacnet_monitor/
 ---
 
 ## 8. Dependencies
+
+**Package Manager:** [uv](https://docs.astral.sh/uv/) — fast Python package manager. Use `uv sync` to install all dependencies from `pyproject.toml`, `uv run` to execute commands in the managed environment.
 
 ### 8.1 Python Backend
 
@@ -460,3 +466,5 @@ The architecture must support adding RS-485 serial capture without restructuring
 | Interface support | Single interface | Sufficient for MVP; multi-interface is future |
 | Python version | 3.12+ | Latest stable, best async performance |
 | App name | NetSight | User-selected |
+| Configuration format | TOML (`user_settings.toml` + `default_settings.toml`) | Human-readable, Python stdlib `tomllib` in 3.11+, comments supported |
+| Settings persistence | Two-file architecture — `user_settings.toml` (active) + `default_settings.toml` (immutable defaults) | Editable by hand or via TUI; reset copies defaults to user file; survives restarts |

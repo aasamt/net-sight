@@ -5,15 +5,16 @@
 NetSight is a cross-platform desktop BACnet/IP network traffic analyzer. It captures, parses, and analyzes BACnet protocol traffic for building automation engineers.
 
 **Stack:** Python 3.12+/FastAPI (backend & CLI) → Electron (shell, later) → React/TypeScript/Vite (frontend, later)
+**Package Manager:** uv (https://docs.astral.sh/uv/) — use `uv run` to execute commands, `uv sync` to install deps
 **IPC:** HTTP REST + WebSocket on `127.0.0.1:8765` (when `--serve` flag is used)
 
 ## Implementation Strategy
 
 Backend-first: the Python backend runs standalone from the terminal before any frontend exists.
-- **Default mode (TUI):** `python backend/main.py -i en0` — live capture with Textual TUI dashboard (top-style fixed panels)
-- **Pcap replay (TUI):** `python backend/main.py -f capture.pcap` — import and analyze with TUI dashboard; shows "Replay complete" and keeps dashboard open for inspection
-- **Plain mode:** `python backend/main.py -i en0 --plain` — scrolling terminal output (original behavior, for scripting/piping/CI)
-- **Server mode:** `python backend/main.py --serve` — starts FastAPI on `127.0.0.1:8765` for REST/WebSocket consumers
+- **Default mode (TUI):** `uv run python backend/main.py -i en0` — live capture with Textual TUI dashboard (top-style fixed panels)
+- **Pcap replay (TUI):** `uv run python backend/main.py -f capture.pcap` — import and analyze with TUI dashboard; shows "Replay complete" and keeps dashboard open for inspection
+- **Plain mode:** `uv run python backend/main.py -i en0 --plain` — scrolling terminal output (original behavior, for scripting/piping/CI)
+- **Server mode:** `uv run python backend/main.py --serve` — starts FastAPI on `127.0.0.1:8765` for REST/WebSocket consumers
 
 Electron and React are built on top of the `--serve` mode in later phases.
 
@@ -34,6 +35,7 @@ Three IPC consumers: React renderer uses REST for request/response, WebSocket fo
 ```
 backend/                     # Python 3.12+, FastAPI
   main.py                    # CLI entry point: TUI (default), --plain, or --serve
+  settings.py                # Settings loader/writer (TOML → AnomalySettings dataclass)
   models/                    # Shared Pydantic models (BVLCMessage, NPDUMessage, APDUMessage, ParsedPacket)
   transport/base.py          # TransportCapture abstract base class
   transport/bacnet_ip.py     # BACnetIPCapture — Scapy AsyncSniffer
@@ -41,12 +43,15 @@ backend/                     # Python 3.12+, FastAPI
   parsers/{bvlc,npdu,apdu}.py  # Per-layer parsers (separated by protocol layer)
   parsers/pipeline.py        # Full decode orchestration
   analysis/                  # device_registry, traffic_stats, anomaly_detector, packet_inspector
-  tui/                       # Textual TUI dashboard (top-style fixed panels)
+  tui/                       # Textual TUI dashboard (tabbed: Traffic, Devices, Settings)
     app.py                   # NetSightApp(App) — main TUI application
-    widgets.py               # PacketTable, StatsPanel, DevicePanel, DeviceListPanel, AnomalyLog widgets
+    widgets.py               # PacketTable, StatsPanel, DevicePanel, DeviceListPanel, AnomalyLog, SettingsPanel
     styles.tcss              # Textual CSS for panel layout and colors
   api/                       # capture, analysis, export REST + ws WebSocket endpoints (--serve mode)
-  tests/                     # Parser and analysis unit tests
+  tests/                     # Parser, analysis, settings, TUI, and CLI unit tests
+settings.toml                # User-adjustable anomaly detection thresholds (project root)
+user_settings.toml           # Active user settings (editable)
+default_settings.toml        # Built-in default settings (do not edit)
 samples/                     # Sample pcap files for testing and development
 frontend/                    # Vite + React 18+ + TypeScript 5+ (later phases)
 electron/                    # main.ts (spawn Python), preload.ts (IPC bridge) (later phases)
@@ -58,6 +63,7 @@ electron/                    # main.ts (spawn Python), preload.ts (IPC bridge) (
 - **Parser separation:** One module per BACnet layer — `bvlc.py`, `npdu.py`, `apdu.py`. Each returns a Pydantic model. `pipeline.py` orchestrates the full decode.
 - **Analysis separation:** One module per concern — `device_registry.py`, `traffic_stats.py`, `anomaly_detector.py`. All fed from the same parsed packet stream.
 - **Models:** Use Pydantic for all data models (`BVLCMessage`, `NPDUMessage`, `APDUMessage`, `ParsedPacket`).
+- **Settings:** Two-file architecture at project root — `user_settings.toml` (active, editable) and `default_settings.toml` (immutable reference). `backend/settings.py` loads from `user_settings.toml`, saves to `user_settings.toml`, and `reset_to_defaults()` copies `default_settings.toml` into `user_settings.toml`. The TUI Settings tab provides live editing with Save and Reset to Defaults. Settings persist across sessions.
 - **Scapy config:** Always use `store=False`, BPF filter `udp port 47808`, immediate mode. Minimize work in `prn` callback — queue raw data only.
 - **Queue backpressure:** Drop oldest on overflow (`put_nowait` with `QueueFull` exception swallowed), never block the capture thread.
 - **Backend security:** FastAPI binds to `127.0.0.1` only. No external access.
@@ -72,13 +78,15 @@ electron/                    # main.ts (spawn Python), preload.ts (IPC bridge) (
 
 ## Key Dependencies & Their Roles
 
+Managed via `uv` with `pyproject.toml`. Use `uv sync` to install, `uv run` to execute.
+
 | Python Package | Role |
 |---|---|
 | `fastapi` + `uvicorn[standard]` | REST API + WebSocket server |
 | `scapy` | Packet capture (AsyncSniffer), NO built-in BACnet layer |
 | `bacpypes3` | BACnet protocol decode (BVLC, NPDU, APDU) |
 | `pydantic` | Data models and validation |
-| `textual` | TUI dashboard — tabbed interface (Traffic + Devices tabs), DataTable, TabbedContent, keyboard nav |
+| `textual` | TUI dashboard — tabbed interface (Traffic, Devices, Settings tabs), DataTable, TabbedContent, Input forms, keyboard nav |
 
 ## Platform-Specific Concerns
 
@@ -93,7 +101,7 @@ electron/                    # main.ts (spawn Python), preload.ts (IPC bridge) (
 - **Type hints:** Required on all function signatures.
 - **Commits:** Conventional commits — `type(scope): description`
   - Types: `feat`, `fix`, `refactor`, `test`, `docs`, `chore`
-  - Scopes: `transport`, `parsers`, `analysis`, `api`, `cli`, `tui`, `models`
+  - Scopes: `transport`, `parsers`, `analysis`, `api`, `cli`, `tui`, `models`, `settings`
   - Example: `feat(parsers): implement BVLC layer decoder`
 - **Branches:** `main` (stable) + `feat/<name>` per phase or major feature.
 

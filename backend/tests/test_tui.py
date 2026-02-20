@@ -31,6 +31,7 @@ from backend.tui.widgets import (
     AnomalyLog,
     DevicePanel,
     PacketTable,
+    SettingsPanel,
     StatsPanel,
     TopTalkersPanel,
 )
@@ -351,6 +352,98 @@ class TestRunTuiFunction:
         with patch("backend.tui.app.NetSightApp.run") as mock_run:
             run_tui(args)
             mock_run.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# Settings Tab Tests
+# ---------------------------------------------------------------------------
+
+class TestSettingsTab:
+    """Test the Settings tab in the TUI."""
+
+    def test_app_has_settings(self) -> None:
+        """App should have a _settings attribute."""
+        app = _make_app()
+        assert app._settings is not None
+        assert app._settings.anomaly.chatty_pps == 50.0
+
+    def test_app_custom_settings(self) -> None:
+        """App should accept custom settings."""
+        from backend.settings import Settings
+
+        settings = Settings()
+        settings.anomaly.chatty_pps = 999.0
+        app = _make_app(settings=settings)
+        assert app._settings.anomaly.chatty_pps == 999.0
+        assert app._anomaly_detector._chatty_pps == 999.0
+
+    async def test_settings_panel_present(self) -> None:
+        """Settings tab should exist in the TUI."""
+        app = _make_app()
+        async with app.run_test(size=(120, 40)) as pilot:
+            await asyncio.sleep(0.5)
+            panel = app.query_one("#settings-panel-tab", SettingsPanel)
+            assert panel is not None
+            await pilot.press("q")
+
+    async def test_settings_panel_loads_values(self) -> None:
+        """Settings panel should display current values after mount."""
+        from backend.settings import Settings
+
+        settings = Settings()
+        settings.anomaly.chatty_pps = 75.0
+        app = _make_app(settings=settings)
+        async with app.run_test(size=(120, 40)) as pilot:
+            await asyncio.sleep(0.5)
+            panel = app.query_one("#settings-panel-tab", SettingsPanel)
+            values = panel.get_values()
+            assert values["chatty_pps"] == 75.0
+            await pilot.press("q")
+
+    async def test_settings_reset_restores_defaults(self) -> None:
+        """Reset button should restore all values to defaults."""
+        from backend.settings import Settings
+        from textual.widgets import Button
+
+        settings = Settings()
+        settings.anomaly.chatty_pps = 999.0
+        app = _make_app(settings=settings)
+        async with app.run_test(size=(120, 40)) as pilot:
+            await asyncio.sleep(0.5)
+            # Simulate reset
+            app._reset_settings_to_defaults()
+            await asyncio.sleep(0.2)
+            assert app._settings.anomaly.chatty_pps == 50.0
+            assert app._anomaly_detector._chatty_pps == 50.0
+            await pilot.press("q")
+
+    async def test_settings_apply_updates_detector(self) -> None:
+        """Saving settings should update the running anomaly detector."""
+        import tempfile
+
+        from backend.settings import Settings
+
+        settings = Settings()
+        # Use a temp file so we don't modify the real settings.toml
+        with tempfile.NamedTemporaryFile(suffix=".toml", delete=False) as f:
+            settings.settings_path = f.name
+
+        app = _make_app(settings=settings)
+        async with app.run_test(size=(120, 40)) as pilot:
+            await asyncio.sleep(0.5)
+            # Modify the chatty_pps input
+            from textual.widgets import Input
+
+            inp = app.query_one("#setting-chatty_pps", Input)
+            inp.value = "200"
+            # Trigger save
+            app._apply_and_save_settings()
+            await asyncio.sleep(0.2)
+            assert app._anomaly_detector._chatty_pps == 200.0
+            assert app._settings.anomaly.chatty_pps == 200.0
+            await pilot.press("q")
+
+        os.unlink(f.name)
 
 
 # ---------------------------------------------------------------------------

@@ -1,0 +1,4 @@
+- Check for memory leaks
+- check for security issues
+- make sure README is correct
+- add ability to parse JSONL files

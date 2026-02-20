@@ -1,7 +1,7 @@
 # NetSight — Session Progress & Handoff
 
-> **Last Updated:** February 17, 2026
-> **Status:** Phase 5d Complete — TUI Tabbed Interface with Devices Tab (160 tests passing)
+> **Last Updated:** February 19, 2026
+> **Status:** Phase 5h Complete — TUI Settings Tab (194 tests passing)
 
 ---
 
@@ -25,6 +25,7 @@ After reading these files, tell me what has been completed and what the next imp
 | Aspect | Detail |
 |--------|--------|
 | **Stack** | Electron (shell) + React/TypeScript/Vite (frontend) + Python 3.12+/FastAPI (backend) |
+| **Package Mgr** | uv (https://docs.astral.sh/uv/) — `uv sync`, `uv run` |
 | **Capture** | Scapy AsyncSniffer with BPF filter `udp port 47808` |
 | **Parsing** | BACpypes3 for BVLC → NPDU → APDU decode pipeline |
 | **IPC** | HTTP REST + WebSocket on `127.0.0.1:8765` |
@@ -111,6 +112,7 @@ After reading these files, tell me what has been completed and what the next imp
   - Error/reject/abort rate monitoring
   - Routing issue detection (Reject-Message-To-Network)
   - Foreign device registration failure tracking
+  - Duplicate device ID detection (same instance from multiple IPs)
   - Cooldown-based deduplication to avoid alert floods
 - [x] Create `backend/analysis/packet_inspector.py`
   - Three detail levels: summary, normal, full
@@ -138,9 +140,9 @@ After reading these files, tell me what has been completed and what the next imp
   - Periodic stats block: total packets, pps, device count, top talkers, anomalies detected
   - Final report on shutdown with full statistics, devices, services, and anomalies
 - [x] JSONL save support: `--save` / `-o` flag to write parsed packets to JSONL file
-- [x] Verify end-to-end: `python -m backend.main -f capture.pcap` replays and analyzes saved traffic
+- [x] Verify end-to-end: `uv run python -m backend.main -f capture.pcap` replays and analyzes saved traffic
 - [x] Additional flags: `--list-interfaces`, `--version`, `--quiet`, `--verbose`, `--replay-speed`
-- [x] Created `backend/__main__.py` for `python -m backend.main` support
+- [x] Created `backend/__main__.py` for `uv run python -m backend.main` support
 - [x] 35 CLI tests covering: argparse, output formatting, pipeline integration, run_capture, packet summary
 
 **Requirement coverage:** FR-CAP-01 through FR-CAP-07, FR-CAP-09, FR-CAP-10, NFR-PER-01, NFR-PER-02, NFR-REL-01, NFR-REL-04
@@ -236,6 +238,116 @@ After reading these files, tell me what has been completed and what the next imp
 - [x] All 160 existing tests pass — no regressions
 
 **Requirement coverage:** FR-DEV-01 through FR-DEV-07 (device tracking/display), NFR-USA-03, NFR-USA-04
+
+---
+
+### Phase 5e: Duplicate Device ID Anomaly Detection & TUI Fix
+- [x] Add `DUPLICATE_DEVICE_ID` anomaly type to `AnomalyType` enum
+  - Severity: critical
+  - Tracks device instance → set of source IPs (`_instance_ips` dict)
+  - Triggers on any packet with a Device-type object identifier (object_type == 8) from a new IP
+  - Not limited to I-Am — ReadProperty, WriteProperty, etc. referencing a Device object also trigger detection
+  - Non-Device objects (Analog-Input, etc.) correctly ignored
+  - Anomaly message lists all conflicting IPs
+  - Respects existing cooldown mechanism to avoid alert floods
+  - State cleared on `reset()`
+- [x] Generate sample pcap: `samples/duplicate_device_id.pcap`
+  - 4 devices: Device-1 (Who-Is), Device-2 (I-Am, instance 200), Device-3 (I-Am, instance 200 — duplicate!), Device-4 (I-Am, instance 300)
+  - Generator script: `samples/gen_duplicate_device.py`
+- [x] Fix AnomalyLog text wrapping in TUI
+  - Replaced `Label` with `Static` inside `VerticalScroll` container for word wrapping
+  - Added `overflow-y: auto` and `width: 100%` CSS for anomaly panel
+- [x] 4 new tests (43 analysis tests total, 134 total across all suites)
+  - Duplicate device ID detected from I-Am traffic
+  - Duplicate device ID detected from non-I-Am traffic (e.g. ReadProperty)
+  - Non-Device objects do not false-positive
+  - Same instance from same IP does not trigger
+
+**Requirement coverage:** FR-ANO-09 (duplicate device ID detection), NFR-USA-04 (anomaly log readability)
+
+---
+
+### Phase 5f: Enhanced Broadcast Storm Detection
+- [x] Expand broadcast storm detection from Who-Is/I-Am only to 4 sub-type patterns:
+  - **Discovery flood** — Who-Is (8), I-Am (0), Who-Has (7), I-Have (1) — unconfirmed services
+  - **Time sync flood** — TimeSynchronization (6), UTC-TimeSynchronization (9) — configurable `timesync_pps` threshold (default 10)
+  - **Unconfirmed service flood** — UnconfirmedCOVNotification (2), WriteGroup (10) — configurable `unconfirmed_flood_pps` threshold (default 30)
+  - **Router discovery flood** — Who-Is-Router-To-Network (0x00), I-Am-Router-To-Network (0x01) — NPDU network messages (no APDU) — configurable `router_discovery_pps` threshold (default 20)
+- [x] Add aggregate broadcast rate window across all sub-types
+  - Catches mixed-pattern storms that don't exceed any single sub-type threshold
+  - Only fires aggregate alert if no sub-type alert already raised for same packet
+- [x] Track NPDU global broadcast (DNET=0xFFFF) in anomaly `details["global_broadcast"]`
+- [x] All storm anomalies use existing `BROADCAST_STORM` enum value with `details["storm_type"]` for sub-type differentiation
+  - Values: `"discovery"`, `"timesync"`, `"unconfirmed"`, `"router"`, `"aggregate"`
+- [x] Updated `reset()` to clear all new sub-type rate windows
+- [x] Updated sample pcap generator: `samples/gen_broadcast_storm.py`
+  - Multi-phase scenario (8 phases): normal discovery → quiet → discovery flood (~60 pps Who-Is + I-Am responses) → calm → TimeSynchronization flood (~15 pps) → calm → router discovery flood (~25 pps Who-Is-Router + I-Am-Router) → recovery
+  - New helper functions: `make_time_sync()`, `make_who_is_router()`, `make_i_am_router()`
+  - Generates 774 packets across 27.5 seconds
+- [x] 7 new tests (50 analysis tests, 171 total across all suites)
+  - `test_anomaly_broadcast_storm` — original test updated with `storm_type` assertion
+  - `test_anomaly_broadcast_storm_who_has` — Who-Has/I-Have triggers discovery sub-type
+  - `test_anomaly_broadcast_storm_timesync` — TimeSynchronization flood triggers timesync sub-type
+  - `test_anomaly_broadcast_storm_unconfirmed` — COV notification flood triggers unconfirmed sub-type
+  - `test_anomaly_broadcast_storm_router_discovery` — NPDU Who-Is-Router flood (no APDU) triggers router sub-type
+  - `test_anomaly_broadcast_storm_aggregate` — mixed traffic below sub-type thresholds triggers aggregate
+  - `test_anomaly_broadcast_storm_below_threshold` — sub-threshold traffic does NOT trigger
+  - `test_anomaly_broadcast_storm_global_broadcast` — DNET=0xFFFF flagged in details
+
+**Requirement coverage:** FR-ANO-02 (broadcast storm detection — expanded), FR-ANO-08 (operational anomalies)
+
+---
+
+### Phase 5g: User-Adjustable Settings File
+- [x] Created `settings.toml` at project root — TOML format, fully commented (later split into `user_settings.toml` + `default_settings.toml`)
+  - All anomaly detection thresholds configurable: `chatty_pps`, `broadcast_pps`, `timesync_pps`, `unconfirmed_flood_pps`, `router_discovery_pps`, `error_pps`, `reject_pps`, `abort_pps`
+  - General parameters: `window_seconds`, `cooldown_seconds`, `max_anomalies`
+- [x] Created `backend/settings.py` — settings loader module
+  - `load_settings(path)` reads TOML, falls back to defaults for missing keys
+  - `AnomalySettings` dataclass with `to_kwargs()` for direct `AnomalyDetector(**kwargs)` usage
+  - Type validation with coercion (int→float), unknown key warnings, malformed file resilience
+  - File is optional — missing/deleted file uses built-in defaults
+- [x] Added `--settings TOML` CLI flag to `backend/main.py`
+  - Default: auto-detects `user_settings.toml` from project root
+  - `AnomalyDetector` now instantiated with `**settings.anomaly_kwargs()`
+- [x] Updated `samples/gen_broadcast_storm.py` — increased burst intensity so all 3 sub-types (discovery, timesync, router) trigger with default thresholds
+  - TimeSynchronization: 160 packets over 8s (~20 pps)
+  - Router discovery: 256 packets over 8s (~32 pps)
+  - Total: 983 packets over 33.5s
+- [x] Per-sub-type cooldown keys — broadcast storm sub-types have independent cooldowns so discovery, timesync, and router alerts fire independently
+- [x] 12 new settings tests (183 total across all suites)
+  - Defaults, missing file, partial override, integer coercion, full override
+  - Unknown key handling, wrong type fallback, empty file, malformed TOML
+  - `anomaly_kwargs()` integration with `AnomalyDetector`
+
+**Requirement coverage:** FR-CFG (configurable thresholds), NFR-USR (user-adjustable settings)
+
+---
+
+### Phase 5h: TUI Settings Tab
+- [x] `SettingsPanel` widget in `backend/tui/widgets.py`
+  - Grouped, labeled Input fields for all 11 anomaly detection parameters
+  - `load_values()` / `get_values()` for programmatic access
+  - Save and Reset to Defaults buttons
+  - Status line for feedback messages
+- [x] Settings tab added to TUI (`TabPane` in `TabbedContent`)
+  - Settings loaded from file on mount
+  - Save button: validates inputs, updates running `AnomalyDetector`, writes to `user_settings.toml`
+  - Reset button: copies `default_settings.toml` into `user_settings.toml`, updates detector + UI
+  - Changes take effect immediately on the running anomaly detector
+- [x] `save_settings()` function in `backend/settings.py`
+  - Generates well-commented TOML grouped by category
+  - Marks non-default values with `# default: X` comments
+  - Round-trip safe: save → load produces identical values
+- [x] `get_defaults()` function reads from `default_settings.toml` (falls back to dataclass defaults)
+- [x] `reset_to_defaults()` function copies `default_settings.toml` content into `user_settings.toml`
+- [x] `--settings` CLI flag wired through `run_tui()` to TUI app
+- [x] Textual CSS styles for settings tab layout
+- [x] 11 new tests (5 save_settings + 1 get_defaults + 5 TUI settings integration)
+  - Save/reload round-trip, readable TOML, non-default marking
+  - Settings panel presence, value loading, reset, apply-updates-detector
+
+**Requirement coverage:** FR-CFG (configurable thresholds), NFR-USR-02 (TUI settings editing)
 
 ---
 
@@ -420,6 +532,11 @@ After reading these files, tell me what has been completed and what the next imp
 | 2026-02-12 | Phase 5b complete — Textual TUI dashboard (top-style fixed panels), --plain/--tui-packets flags, 30 test cases, 160 total passing |
 | 2026-02-13 | Phase 5c complete — PacketDetailPanel, live filter, PDU Type/Object columns, APDU model extensions (I-Am, Who-Is, property ID), parser enrichment, layout refinements |
 | 2026-02-17 | Phase 5d complete — TUI tabbed interface with TabbedContent; Devices tab with full DeviceListPanel DataTable (IP, device ID, object type, vendor, traffic stats, timestamps) |
+| 2026-02-19 | Phase 5e complete — Duplicate device ID anomaly detection (any Device-type object, not just I-Am); AnomalyLog text wrapping fix; sample pcap with duplicate IDs; 134 tests passing |
+| 2026-02-19 | Phase 5f complete — Enhanced broadcast storm detection: 4 sub-type patterns (discovery, timesync, unconfirmed, router) + aggregate; multi-pattern sample pcap; 171 tests passing |
+| 2026-02-19 | Phase 5g complete — User-adjustable settings.toml; settings loader with validation/fallback; --settings CLI flag; per-sub-type cooldowns; pcap burst intensity increased; 183 tests passing |
+| 2026-02-19 | Phase 5h complete — TUI Settings tab: SettingsPanel widget, save/reset buttons, live detector updates, save_settings() TOML writer, get_defaults(); 194 tests passing |
+| 2026-02-19 | Settings restructured to two-file architecture: user_settings.toml (active) + default_settings.toml (immutable defaults); reset_to_defaults() copies defaults to user file; 197 tests passing |
 
 ---
 
@@ -431,4 +548,4 @@ After reading these files, tell me what has been completed and what the next imp
 3. Create WebSocket endpoints for real-time packet/stats/anomaly streaming
 4. Test with curl and wscat
 
-**Goal:** By end of Phase 6, run `python backend/main.py --serve` and consume live BACnet data via REST/WebSocket from any HTTP client.
+**Goal:** By end of Phase 6, run `uv run python backend/main.py --serve` and consume live BACnet data via REST/WebSocket from any HTTP client.

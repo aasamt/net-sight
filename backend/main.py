@@ -22,6 +22,7 @@ from backend.analysis.anomaly_detector import AnomalyDetector
 from backend.analysis.device_registry import DeviceRegistry
 from backend.analysis.traffic_stats import TrafficStats
 from backend.parsers.pipeline import parse_packet
+from backend.settings import load_settings
 from backend.transport.bacnet_ip import BACnetIPCapture
 from backend.transport.base import RawPacket
 from backend.transport.pcap_replay import PcapReplayCapture
@@ -107,6 +108,14 @@ def build_parser() -> argparse.ArgumentParser:
         default=50,
         metavar="N",
         help="Max recent packets in TUI table (default: 50)",
+    )
+
+    # Settings
+    parser.add_argument(
+        "--settings",
+        metavar="TOML",
+        default=None,
+        help="Path to user_settings.toml (default: auto-detect from project root)",
     )
 
     # Utility
@@ -265,10 +274,15 @@ async def run_capture(args: argparse.Namespace) -> None:
     """Run the packet capture → parse → analyze → display pipeline."""
     loop = asyncio.get_running_loop()
 
+    # --- Settings ---
+    settings = load_settings(args.settings)
+    if settings.settings_path:
+        logger.info("Loaded settings from %s", settings.settings_path)
+
     # --- Analysis engines ---
     device_registry = DeviceRegistry()
     traffic_stats = TrafficStats()
-    anomaly_detector = AnomalyDetector()
+    anomaly_detector = AnomalyDetector(**settings.anomaly_kwargs())
 
     # --- Packet queue (thread-safe bridge) ---
     queue: asyncio.Queue[RawPacket] = asyncio.Queue(maxsize=10_000)
@@ -462,6 +476,9 @@ def run_tui(args: argparse.Namespace) -> None:
     """Launch the Textual TUI dashboard."""
     from backend.tui.app import NetSightApp
 
+    # Load settings
+    settings = load_settings(args.settings)
+
     is_live = bool(args.interface)
 
     if is_live:
@@ -481,6 +498,7 @@ def run_tui(args: argparse.Namespace) -> None:
         max_rows=args.tui_packets,
         save_path=args.save,
         replay_speed=args.replay_speed,
+        settings=settings,
     )
     app.run()
 

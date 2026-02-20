@@ -473,6 +473,185 @@ def test_anomaly_broadcast_storm():
         result = detector.process_packet(pkt)
         new_anomalies.extend(result)
     assert any(a.type == AnomalyType.BROADCAST_STORM for a in new_anomalies)
+    storm = [a for a in new_anomalies if a.type == AnomalyType.BROADCAST_STORM][0]
+    assert storm.details["storm_type"] == "discovery"
+
+
+def test_anomaly_broadcast_storm_who_has():
+    """Anomaly — Who-Has/I-Have flood triggers discovery broadcast storm."""
+    detector = AnomalyDetector(broadcast_pps=5, window_seconds=1.0, cooldown_seconds=0)
+    now = 2050.0
+    new_anomalies = []
+    for i in range(10):
+        # Alternate Who-Has (7) and I-Have (1)
+        svc = 7 if i % 2 == 0 else 1
+        svc_name = "Who-Has" if svc == 7 else "I-Have"
+        pkt = make_packet(
+            src_ip=f"192.168.1.{i + 10}",
+            apdu_pdu_type=1,
+            apdu_service_choice=svc,
+            apdu_service_name=svc_name,
+            ts=now + i * 0.05,
+        )
+        result = detector.process_packet(pkt)
+        new_anomalies.extend(result)
+    storm = [a for a in new_anomalies if a.type == AnomalyType.BROADCAST_STORM]
+    assert len(storm) >= 1
+    assert storm[0].details["storm_type"] == "discovery"
+    assert "discovery flood" in storm[0].message
+
+
+def test_anomaly_broadcast_storm_timesync():
+    """Anomaly — TimeSynchronization flood triggers timesync broadcast storm."""
+    detector = AnomalyDetector(
+        timesync_pps=5, broadcast_pps=100, window_seconds=1.0, cooldown_seconds=0,
+    )
+    now = 2100.0
+    new_anomalies = []
+    for i in range(10):
+        pkt = make_packet(
+            src_ip="192.168.1.80",
+            apdu_pdu_type=1,
+            apdu_service_choice=6,
+            apdu_service_name="TimeSynchronization",
+            ts=now + i * 0.05,
+        )
+        result = detector.process_packet(pkt)
+        new_anomalies.extend(result)
+    storm = [a for a in new_anomalies if a.type == AnomalyType.BROADCAST_STORM]
+    assert len(storm) >= 1
+    assert storm[0].details["storm_type"] == "timesync"
+    assert "time sync flood" in storm[0].message
+
+
+def test_anomaly_broadcast_storm_unconfirmed():
+    """Anomaly — COV notification flood triggers unconfirmed broadcast storm."""
+    detector = AnomalyDetector(
+        unconfirmed_flood_pps=5, broadcast_pps=100, window_seconds=1.0, cooldown_seconds=0,
+    )
+    now = 2150.0
+    new_anomalies = []
+    for i in range(10):
+        pkt = make_packet(
+            src_ip="192.168.1.50",
+            apdu_pdu_type=1,
+            apdu_service_choice=2,
+            apdu_service_name="UnconfirmedCOVNotification",
+            ts=now + i * 0.05,
+        )
+        result = detector.process_packet(pkt)
+        new_anomalies.extend(result)
+    storm = [a for a in new_anomalies if a.type == AnomalyType.BROADCAST_STORM]
+    assert len(storm) >= 1
+    assert storm[0].details["storm_type"] == "unconfirmed"
+    assert "COV/WriteGroup" in storm[0].message
+
+
+def test_anomaly_broadcast_storm_router_discovery():
+    """Anomaly — Who-Is-Router flood (NPDU network msg, no APDU) triggers router storm."""
+    detector = AnomalyDetector(
+        router_discovery_pps=5, broadcast_pps=100, window_seconds=1.0, cooldown_seconds=0,
+    )
+    now = 2200.0
+    new_anomalies = []
+    for i in range(10):
+        pkt = make_packet(
+            src_ip="192.168.1.90",
+            npdu_is_network_msg=True,
+            npdu_net_msg_type=0x00,
+            npdu_net_msg_name="Who-Is-Router-To-Network",
+            skip_apdu=True,
+            ts=now + i * 0.05,
+        )
+        result = detector.process_packet(pkt)
+        new_anomalies.extend(result)
+    storm = [a for a in new_anomalies if a.type == AnomalyType.BROADCAST_STORM]
+    assert len(storm) >= 1
+    assert storm[0].details["storm_type"] == "router"
+    assert "router discovery flood" in storm[0].message
+
+
+def test_anomaly_broadcast_storm_aggregate():
+    """Anomaly — mixed broadcast traffic below sub-type thresholds but above aggregate."""
+    detector = AnomalyDetector(
+        broadcast_pps=5,
+        timesync_pps=100,
+        router_discovery_pps=100,
+        window_seconds=1.0,
+        cooldown_seconds=0,
+    )
+    now = 2250.0
+    new_anomalies = []
+    # Send 4 Who-Is + 4 TimeSynchronization — each sub-type is 4 pps (< their thresholds)
+    # but aggregate is 8 pps (> broadcast_pps=5)
+    for i in range(4):
+        pkt = make_packet(
+            src_ip=f"192.168.1.{i + 10}",
+            apdu_pdu_type=1,
+            apdu_service_choice=8,
+            apdu_service_name="Who-Is",
+            ts=now + i * 0.05,
+        )
+        result = detector.process_packet(pkt)
+        new_anomalies.extend(result)
+    for i in range(4):
+        pkt = make_packet(
+            src_ip="192.168.1.80",
+            apdu_pdu_type=1,
+            apdu_service_choice=6,
+            apdu_service_name="TimeSynchronization",
+            ts=now + 0.2 + i * 0.05,
+        )
+        result = detector.process_packet(pkt)
+        new_anomalies.extend(result)
+    storm = [a for a in new_anomalies if a.type == AnomalyType.BROADCAST_STORM]
+    assert len(storm) >= 1
+    # Could be discovery (if it fires first) or aggregate — both are valid
+    types_seen = {s.details["storm_type"] for s in storm}
+    assert "discovery" in types_seen or "aggregate" in types_seen
+
+
+def test_anomaly_broadcast_storm_below_threshold():
+    """Anomaly — sub-threshold broadcast traffic does NOT trigger storm."""
+    detector = AnomalyDetector(
+        broadcast_pps=50, timesync_pps=50, router_discovery_pps=50,
+        window_seconds=1.0, cooldown_seconds=0,
+    )
+    now = 2300.0
+    # Send 3 Who-Is at 1 pps — well below any threshold
+    for i in range(3):
+        pkt = make_packet(
+            src_ip="192.168.1.10",
+            apdu_pdu_type=1,
+            apdu_service_choice=8,
+            apdu_service_name="Who-Is",
+            ts=now + i * 1.0,
+        )
+        result = detector.process_packet(pkt)
+        storm = [a for a in result if a.type == AnomalyType.BROADCAST_STORM]
+        assert len(storm) == 0
+
+
+def test_anomaly_broadcast_storm_global_broadcast():
+    """Anomaly — global broadcast (DNET=0xFFFF) noted in storm details."""
+    detector = AnomalyDetector(broadcast_pps=5, window_seconds=1.0, cooldown_seconds=0)
+    now = 2350.0
+    new_anomalies = []
+    for i in range(10):
+        pkt = make_packet(
+            src_ip=f"192.168.1.{i + 10}",
+            apdu_pdu_type=1,
+            apdu_service_choice=8,
+            apdu_service_name="Who-Is",
+            ts=now + i * 0.05,
+        )
+        # Set NPDU destination_network to 0xFFFF (global broadcast)
+        pkt.npdu.destination_network = 0xFFFF
+        result = detector.process_packet(pkt)
+        new_anomalies.extend(result)
+    storm = [a for a in new_anomalies if a.type == AnomalyType.BROADCAST_STORM]
+    assert len(storm) >= 1
+    assert storm[0].details["global_broadcast"] is True
 
 
 def test_anomaly_high_error_rate():
@@ -550,6 +729,92 @@ def test_anomaly_foreign_device_nak():
     assert "Register-Foreign-Device-NAK" in nak[0].message
 
 
+def test_anomaly_duplicate_device_id():
+    """Anomaly — duplicate device ID detected when same instance from different IPs."""
+    detector = AnomalyDetector(cooldown_seconds=0)
+    now = 5500.0
+    # First I-Am from 192.168.1.20 with instance 200
+    pkt1 = make_iam(200, "192.168.1.20", ts=now)
+    result1 = detector.process_packet(pkt1)
+    # No anomaly yet — first time seeing this instance
+    dup1 = [a for a in result1 if a.type == AnomalyType.DUPLICATE_DEVICE_ID]
+    assert len(dup1) == 0
+
+    # Second I-Am from 192.168.1.30 with SAME instance 200
+    pkt2 = make_iam(200, "192.168.1.30", ts=now + 0.1)
+    result2 = detector.process_packet(pkt2)
+    dup2 = [a for a in result2 if a.type == AnomalyType.DUPLICATE_DEVICE_ID]
+    assert len(dup2) == 1
+    assert dup2[0].severity == "critical"
+    assert "200" in dup2[0].message
+    assert "192.168.1.20" in dup2[0].message
+    assert "192.168.1.30" in dup2[0].message
+    assert dup2[0].details["device_instance"] == 200
+    assert set(dup2[0].details["ips"]) == {"192.168.1.20", "192.168.1.30"}
+
+
+def test_anomaly_duplicate_device_id_non_iam():
+    """Anomaly — duplicate device ID detected from non-I-Am traffic (e.g. ReadProperty)."""
+    detector = AnomalyDetector(cooldown_seconds=0)
+    now = 5550.0
+    # I-Am establishes Device:200 at 192.168.1.20
+    pkt1 = make_iam(200, "192.168.1.20", ts=now)
+    result1 = detector.process_packet(pkt1)
+    assert not [a for a in result1 if a.type == AnomalyType.DUPLICATE_DEVICE_ID]
+
+    # ReadProperty from a DIFFERENT IP referencing Device:200
+    pkt2 = make_packet(
+        src_ip="192.168.1.30",
+        apdu_pdu_type=0,
+        apdu_service_choice=12,
+        apdu_service_name="ReadProperty",
+        apdu_is_confirmed=True,
+        apdu_invoke_id=1,
+        obj_type=8,
+        obj_type_name="Device",
+        obj_instance=200,
+        ts=now + 0.1,
+    )
+    result2 = detector.process_packet(pkt2)
+    dup = [a for a in result2 if a.type == AnomalyType.DUPLICATE_DEVICE_ID]
+    assert len(dup) == 1
+    assert "200" in dup[0].message
+    assert set(dup[0].details["ips"]) == {"192.168.1.20", "192.168.1.30"}
+
+
+def test_anomaly_duplicate_non_device_object_ignored():
+    """Anomaly — duplicate instance on non-Device objects does not trigger."""
+    detector = AnomalyDetector(cooldown_seconds=0)
+    now = 5570.0
+    # AnalogInput:1 from two different IPs should NOT trigger duplicate device ID
+    pkt1 = make_packet(
+        src_ip="192.168.1.20",
+        obj_type=0, obj_type_name="Analog-Input", obj_instance=1,
+        ts=now,
+    )
+    pkt2 = make_packet(
+        src_ip="192.168.1.30",
+        obj_type=0, obj_type_name="Analog-Input", obj_instance=1,
+        ts=now + 0.1,
+    )
+    result1 = detector.process_packet(pkt1)
+    result2 = detector.process_packet(pkt2)
+    all_dup = [a for a in result1 + result2 if a.type == AnomalyType.DUPLICATE_DEVICE_ID]
+    assert len(all_dup) == 0
+
+
+def test_anomaly_no_duplicate_same_ip():
+    """Anomaly — same instance from same IP is not a duplicate."""
+    detector = AnomalyDetector(cooldown_seconds=0)
+    now = 5600.0
+    pkt1 = make_iam(300, "192.168.1.40", ts=now)
+    pkt2 = make_iam(300, "192.168.1.40", ts=now + 1.0)
+    result1 = detector.process_packet(pkt1)
+    result2 = detector.process_packet(pkt2)
+    all_dup = [a for a in result1 + result2 if a.type == AnomalyType.DUPLICATE_DEVICE_ID]
+    assert len(all_dup) == 0
+
+
 def test_anomaly_cooldown():
     """Anomaly — cooldown prevents duplicate alerts within window."""
     detector = AnomalyDetector(cooldown_seconds=60, chatty_pps=2, window_seconds=1.0)
@@ -611,11 +876,22 @@ if _DIRECT_RUN:
     for fn in [
         test_anomaly_chatty_device,
         test_anomaly_broadcast_storm,
+        test_anomaly_broadcast_storm_who_has,
+        test_anomaly_broadcast_storm_timesync,
+        test_anomaly_broadcast_storm_unconfirmed,
+        test_anomaly_broadcast_storm_router_discovery,
+        test_anomaly_broadcast_storm_aggregate,
+        test_anomaly_broadcast_storm_below_threshold,
+        test_anomaly_broadcast_storm_global_broadcast,
         test_anomaly_high_error_rate,
         test_anomaly_high_reject_rate,
         test_anomaly_high_abort_rate,
         test_anomaly_routing_issue,
         test_anomaly_foreign_device_nak,
+        test_anomaly_duplicate_device_id,
+        test_anomaly_duplicate_device_id_non_iam,
+        test_anomaly_duplicate_non_device_object_ignored,
+        test_anomaly_no_duplicate_same_ip,
         test_anomaly_cooldown,
         test_anomaly_no_false_positive,
         test_anomaly_reset,

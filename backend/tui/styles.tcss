@@ -118,6 +118,11 @@ Screen {
     width: 1fr;
     height: 100%;
     border: solid $warning;
+    overflow-y: auto;
+}
+
+#anomaly-content {
+    width: 100%;
 }
 
 /* ---------- Panel titles ---------- */
@@ -172,6 +177,90 @@ TabPane {
 
 #tab-devices {
     layout: vertical;
+}
+
+#tab-settings {
+    layout: vertical;
+}
+
+/* ---------- Settings Panel (settings tab) ---------- */
+#settings-panel-tab {
+    height: 100%;
+    border: solid $accent;
+}
+
+#settings-panel-tab .panel-title {
+    dock: top;
+    height: 1;
+    background: $accent;
+    color: $text;
+    text-style: bold;
+    padding: 0 1;
+}
+
+#settings-hint {
+    dock: top;
+    height: 1;
+    background: $surface;
+    color: $text-muted;
+    padding: 0 1;
+}
+
+#settings-scroll {
+    height: 1fr;
+    scrollbar-size: 1 1;
+    padding: 0 1;
+}
+
+.settings-group-header {
+    height: 1;
+    color: $accent;
+    text-style: bold;
+    margin-top: 1;
+}
+
+.settings-row {
+    height: 3;
+    layout: horizontal;
+    padding: 0 1;
+}
+
+.settings-label {
+    width: 26;
+    height: 3;
+    content-align: left middle;
+    text-style: bold;
+}
+
+.settings-input {
+    width: 16;
+    height: 3;
+}
+
+.settings-desc {
+    width: 1fr;
+    height: 3;
+    content-align: left middle;
+    color: $text-muted;
+    padding-left: 1;
+}
+
+#settings-buttons {
+    dock: bottom;
+    height: 3;
+    padding: 0 2;
+    align: left middle;
+}
+
+#settings-buttons Button {
+    margin-right: 2;
+}
+
+#settings-status {
+    dock: bottom;
+    height: 1;
+    padding: 0 1;
+    color: $success;
 }
 
 /* ---------- Device List Panel (devices tab) ---------- */

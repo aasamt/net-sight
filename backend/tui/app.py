@@ -21,13 +21,14 @@ from typing import TYPE_CHECKING
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
-from textual.widgets import DataTable, Footer, Header, Label, TabbedContent, TabPane
+from textual.widgets import Button, DataTable, Footer, Header, Label, TabbedContent, TabPane
 
 from backend.analysis.anomaly_detector import AnomalyDetector
 from backend.analysis.device_registry import DeviceRegistry
 from backend.analysis.traffic_stats import TrafficStats
 from backend.models.packet import ParsedPacket
 from backend.parsers.pipeline import parse_packet
+from backend.settings import Settings, get_defaults, load_settings, reset_to_defaults, save_settings
 from backend.transport.base import RawPacket
 
 from .widgets import (
@@ -36,6 +37,7 @@ from .widgets import (
     DevicePanel,
     PacketDetailPanel,
     PacketTable,
+    SettingsPanel,
     StatsPanel,
     TopTalkersPanel,
 )
@@ -70,6 +72,7 @@ class NetSightApp(App):
         max_rows: int = 50,
         save_path: str | None = None,
         replay_speed: float = 0.0,
+        settings: Settings | None = None,
     ) -> None:
         super().__init__()
         self._transport = transport
@@ -79,10 +82,13 @@ class NetSightApp(App):
         self._save_path = save_path
         self._replay_speed = replay_speed
 
+        # Settings (load from file if not provided)
+        self._settings = settings if settings is not None else load_settings()
+
         # Analysis engines
         self._device_registry = DeviceRegistry()
         self._traffic_stats = TrafficStats()
-        self._anomaly_detector = AnomalyDetector()
+        self._anomaly_detector = AnomalyDetector(**self._settings.anomaly_kwargs())
 
         # Packet storage for save and detail lookup
         self._parsed_packets: list[ParsedPacket] = []
@@ -119,6 +125,8 @@ class NetSightApp(App):
                     yield AnomalyLog(id="anomaly-panel")
             with TabPane("Devices", id="tab-devices"):
                 yield DeviceListPanel(id="device-list-panel")
+            with TabPane("Settings", id="tab-settings"):
+                yield SettingsPanel(id="settings-panel-tab")
         yield Footer()
 
     # ------------------------------------------------------------------
@@ -153,6 +161,10 @@ class NetSightApp(App):
         if not self._is_live:
             # Watch for replay completion
             self._replay_watcher = asyncio.create_task(self._watch_replay())
+
+        # Load settings into the Settings tab
+        settings_panel = self.query_one("#settings-panel-tab", SettingsPanel)
+        settings_panel.load_values(self._settings.anomaly_kwargs())
 
     async def _watch_replay(self) -> None:
         """Wait for pcap replay to finish, then mark complete."""
@@ -387,3 +399,65 @@ class NetSightApp(App):
             self._replay_watcher.cancel()
 
         self.exit()
+
+    # ------------------------------------------------------------------
+    # Settings tab — Save / Reset handlers
+    # ------------------------------------------------------------------
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        """Handle Save and Reset button presses in the Settings tab."""
+        if event.button.id == "btn-save-settings":
+            self._apply_and_save_settings()
+        elif event.button.id == "btn-reset-settings":
+            self._reset_settings_to_defaults()
+
+    def _apply_and_save_settings(self) -> None:
+        """Read values from the settings panel, apply to detector, and save to file."""
+        panel = self.query_one("#settings-panel-tab", SettingsPanel)
+        values = panel.get_values()
+
+        if not values:
+            panel.set_status("No valid values to save", is_error=True)
+            return
+
+        # Validate: all values must be positive numbers
+        for key, val in values.items():
+            if val <= 0:
+                panel.set_status(f"'{key}' must be positive (got {val})", is_error=True)
+                return
+
+        # Update the settings object
+        for key, val in values.items():
+            setattr(self._settings.anomaly, key, val)
+
+        # Rebuild the anomaly detector with new thresholds
+        self._anomaly_detector = AnomalyDetector(**self._settings.anomaly_kwargs())
+
+        # Persist to file
+        try:
+            path = save_settings(self._settings)
+            panel.set_status(f"Saved to {path} — applied to running detector")
+            self.notify("Settings saved and applied", severity="information")
+        except OSError as e:
+            panel.set_status(f"Save failed: {e}", is_error=True)
+            self.notify(f"Settings save failed: {e}", severity="error")
+
+    def _reset_settings_to_defaults(self) -> None:
+        """Reset all settings to built-in defaults (from default_settings.toml)."""
+        try:
+            result = reset_to_defaults()
+            self._settings.anomaly = result.anomaly
+        except OSError as e:
+            panel = self.query_one("#settings-panel-tab", SettingsPanel)
+            panel.set_status(f"Reset failed: {e}", is_error=True)
+            return
+
+        # Rebuild the detector with defaults
+        self._anomaly_detector = AnomalyDetector(**self._settings.anomaly_kwargs())
+
+        # Update the UI inputs
+        panel = self.query_one("#settings-panel-tab", SettingsPanel)
+        panel.load_values(self._settings.anomaly_kwargs())
+
+        panel.set_status(f"Reset to defaults — saved to {self._settings.settings_path}")
+        self.notify("Settings reset to defaults", severity="information")

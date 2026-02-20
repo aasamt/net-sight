@@ -18,7 +18,7 @@ from typing import TYPE_CHECKING
 
 from textual.app import ComposeResult
 from textual.containers import Horizontal, VerticalScroll
-from textual.widgets import DataTable, Input, Label, Static
+from textual.widgets import Button, DataTable, Input, Label, Static
 
 if TYPE_CHECKING:
     from backend.models.packet import ParsedPacket
@@ -569,6 +569,9 @@ class AnomalyLog(Static):
     AnomalyLog {
         height: 100%;
     }
+    #anomaly-scroll {
+        height: 1fr;
+    }
     """
 
     def __init__(self, max_entries: int = 50, **kwargs: object) -> None:
@@ -577,7 +580,8 @@ class AnomalyLog(Static):
 
     def compose(self) -> ComposeResult:
         yield Label(" Anomalies", classes="panel-title")
-        yield Label("  No anomalies detected", id="anomaly-content")
+        with VerticalScroll(id="anomaly-scroll"):
+            yield Static("  No anomalies detected", id="anomaly-content")
 
     def add_anomaly(self, severity: str, message: str) -> None:
         """Add an anomaly entry."""
@@ -592,10 +596,133 @@ class AnomalyLog(Static):
 
     def _refresh_display(self) -> None:
         """Redraw the log from deque."""
-        content = self.query_one("#anomaly-content", Label)
+        content = self.query_one("#anomaly-content", Static)
         if self._entries:
             # Show last entries that fit in the panel
             visible = list(self._entries)[-15:]
             content.update("\n".join(visible))
         else:
             content.update("  No anomalies detected")
+
+
+# ---------------------------------------------------------------------------
+# Settings Panel (settings tab)
+# ---------------------------------------------------------------------------
+
+# Field definitions: (key, label, description)
+_SETTINGS_FIELDS: list[tuple[str, str, str]] = [
+    # General
+    ("window_seconds", "Rate Window (s)", "Sliding window for rate calculations"),
+    ("cooldown_seconds", "Alert Cooldown (s)", "Min time between duplicate alerts"),
+    ("max_anomalies", "Max Anomalies", "Max anomaly records kept in memory"),
+    # Chatty device
+    ("chatty_pps", "Chatty Device (pps)", "Per-IP threshold for chatty device alerts"),
+    # Broadcast storm
+    ("broadcast_pps", "Discovery Flood (pps)", "Who-Is/I-Am/Who-Has/I-Have threshold"),
+    ("timesync_pps", "TimeSynchronization (pps)", "TimeSynchronization flood threshold"),
+    ("unconfirmed_flood_pps", "Unconfirmed Flood (pps)", "COV/WriteGroup flood threshold"),
+    ("router_discovery_pps", "Router Discovery (pps)", "Who-Is-Router/I-Am-Router threshold"),
+    # Error rates
+    ("error_pps", "Error Rate (pps)", "BACnet-Error response rate threshold"),
+    ("reject_pps", "Reject Rate (pps)", "BACnet-Reject response rate threshold"),
+    ("abort_pps", "Abort Rate (pps)", "BACnet-Abort response rate threshold"),
+]
+
+# Group boundaries for visual separation
+_SETTINGS_GROUPS: list[tuple[str, int, int]] = [
+    ("General", 0, 3),
+    ("Chatty Device", 3, 4),
+    ("Broadcast Storm Thresholds", 4, 8),
+    ("Error / Reject / Abort Rates", 8, 11),
+]
+
+
+class SettingsPanel(Static):
+    """Editable settings panel — shows current thresholds with inline editing.
+
+    The panel displays all anomaly detection settings as labeled Input fields.
+    Users can modify values, save to settings.toml, or reset to defaults.
+    Changes take effect on the running anomaly detector immediately.
+    """
+
+    DEFAULT_CSS = """
+    SettingsPanel {
+        height: 100%;
+    }
+    """
+
+    def __init__(self, **kwargs: object) -> None:
+        super().__init__(**kwargs)
+        self._inputs: dict[str, Input] = {}
+
+    def compose(self) -> ComposeResult:
+        yield Label(" Settings — Anomaly Detection Thresholds", classes="panel-title")
+        yield Static(
+            "  Edit values below and press Save. Changes apply immediately.",
+            id="settings-hint",
+        )
+        with VerticalScroll(id="settings-scroll"):
+            for group_name, start, end in _SETTINGS_GROUPS:
+                yield Label(f"  ── {group_name} ──", classes="settings-group-header")
+                for key, label, desc in _SETTINGS_FIELDS[start:end]:
+                    with Horizontal(classes="settings-row"):
+                        yield Label(f"  {label}", classes="settings-label")
+                        yield Input(
+                            value="",
+                            placeholder="—",
+                            id=f"setting-{key}",
+                            classes="settings-input",
+                        )
+                        yield Label(desc, classes="settings-desc")
+        with Horizontal(id="settings-buttons"):
+            yield Button("Save", variant="success", id="btn-save-settings")
+            yield Button("Reset to Defaults", variant="warning", id="btn-reset-settings")
+        yield Static("", id="settings-status")
+
+    def load_values(self, values: dict[str, float | int]) -> None:
+        """Populate the input fields from a settings dict."""
+        for key, _, _ in _SETTINGS_FIELDS:
+            input_id = f"setting-{key}"
+            try:
+                inp = self.query_one(f"#{input_id}", Input)
+                val = values.get(key)
+                if val is not None:
+                    inp.value = self._format_display(val)
+            except Exception:
+                pass
+
+    def get_values(self) -> dict[str, float | int]:
+        """Read current Input field values, returning a dict of valid entries.
+
+        Invalid (non-numeric) fields are skipped.
+        """
+        result: dict[str, float | int] = {}
+        for key, label, _ in _SETTINGS_FIELDS:
+            input_id = f"setting-{key}"
+            try:
+                inp = self.query_one(f"#{input_id}", Input)
+                text = inp.value.strip()
+                if not text:
+                    continue
+                if key == "max_anomalies":
+                    result[key] = int(float(text))
+                else:
+                    result[key] = float(text)
+            except (ValueError, Exception):
+                pass
+        return result
+
+    def set_status(self, message: str, is_error: bool = False) -> None:
+        """Update the status line below the buttons."""
+        status = self.query_one("#settings-status", Static)
+        prefix = "  ✗ " if is_error else "  ✓ "
+        status.update(prefix + message)
+
+    @staticmethod
+    def _format_display(val: float | int) -> str:
+        """Format a value for display in an Input field."""
+        if isinstance(val, int):
+            return str(val)
+        if val == int(val):
+            return str(int(val))
+        return str(val)

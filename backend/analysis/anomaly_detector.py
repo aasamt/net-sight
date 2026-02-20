@@ -2,7 +2,12 @@
 
 Detects operational anomalies by monitoring packet rates and patterns:
 - Chatty device: source IP exceeding configurable pps threshold
-- Broadcast storm: Who-Is/I-Am flood rate exceeding threshold
+- Broadcast storm: multi-pattern detection across 4 sub-types:
+    • Discovery flood: Who-Is/I-Am/Who-Has/I-Have
+    • Time sync flood: TimeSynchronization/UTC-TimeSynchronization
+    • Unconfirmed service flood: UnconfirmedCOVNotification/WriteGroup
+    • Router discovery flood: Who-Is-Router/I-Am-Router (NPDU network messages)
+  Plus an aggregate rate across all broadcast-type traffic.
 - Error/reject/abort rate: rising failure rates
 - Routing issues: Reject-Message-To-Network occurrences
 - Foreign device registration failures: BVLC-Result NAKs
@@ -37,6 +42,7 @@ class AnomalyType(str, Enum):
     HIGH_ABORT_RATE = "high-abort-rate"
     ROUTING_ISSUE = "routing-issue"
     FOREIGN_DEVICE_NAK = "foreign-device-nak"
+    DUPLICATE_DEVICE_ID = "duplicate-device-id"
 
 
 @dataclass
@@ -99,6 +105,9 @@ class AnomalyDetector:
         *,
         chatty_pps: float = 50.0,
         broadcast_pps: float = 30.0,
+        timesync_pps: float = 10.0,
+        unconfirmed_flood_pps: float = 30.0,
+        router_discovery_pps: float = 20.0,
         error_pps: float = 10.0,
         reject_pps: float = 5.0,
         abort_pps: float = 5.0,
@@ -110,7 +119,11 @@ class AnomalyDetector:
 
         Args:
             chatty_pps: Packets/sec threshold per source IP to flag as chatty.
-            broadcast_pps: Who-Is + I-Am packets/sec threshold for broadcast storm.
+            broadcast_pps: Aggregate broadcast pps threshold (also used for
+                discovery sub-type: Who-Is/I-Am/Who-Has/I-Have).
+            timesync_pps: TimeSynchronization/UTC-TimeSynchronization pps threshold.
+            unconfirmed_flood_pps: UnconfirmedCOVNotification/WriteGroup pps threshold.
+            router_discovery_pps: Who-Is-Router/I-Am-Router (NPDU) pps threshold.
             error_pps: Error PDUs/sec threshold.
             reject_pps: Reject PDUs/sec threshold.
             abort_pps: Abort PDUs/sec threshold.
@@ -123,6 +136,9 @@ class AnomalyDetector:
         # Thresholds
         self._chatty_pps = chatty_pps
         self._broadcast_pps = broadcast_pps
+        self._timesync_pps = timesync_pps
+        self._unconfirmed_flood_pps = unconfirmed_flood_pps
+        self._router_discovery_pps = router_discovery_pps
         self._error_pps = error_pps
         self._reject_pps = reject_pps
         self._abort_pps = abort_pps
@@ -132,8 +148,15 @@ class AnomalyDetector:
         # Rate windows per source IP
         self._per_ip_rates: dict[str, _RateWindow] = {}
 
-        # Global rate windows for broadcast/error/reject/abort
+        # Broadcast sub-type rate windows
+        self._discovery_rate = _RateWindow(window_seconds=window_seconds)
+        self._timesync_rate = _RateWindow(window_seconds=window_seconds)
+        self._unconfirmed_flood_rate = _RateWindow(window_seconds=window_seconds)
+        self._router_discovery_rate = _RateWindow(window_seconds=window_seconds)
+        # Aggregate broadcast rate (all sub-types combined)
         self._broadcast_rate = _RateWindow(window_seconds=window_seconds)
+
+        # Global rate windows for error/reject/abort
         self._error_rate = _RateWindow(window_seconds=window_seconds)
         self._reject_rate = _RateWindow(window_seconds=window_seconds)
         self._abort_rate = _RateWindow(window_seconds=window_seconds)
@@ -143,6 +166,9 @@ class AnomalyDetector:
 
         # Cooldown tracker: (anomaly_type, source_ip) → last alert timestamp
         self._last_alert: dict[tuple[str, str | None], float] = {}
+
+        # Duplicate device ID tracking: device instance → set of IPs
+        self._instance_ips: dict[int, set[str]] = {}
 
     def process_packet(self, packet: ParsedPacket) -> list[Anomaly]:
         """Process a parsed packet and return any new anomalies detected.
@@ -176,21 +202,129 @@ class AnomalyDetector:
                 if a:
                     new_anomalies.append(a)
 
-            # --- Broadcast storm (Who-Is / I-Am) ---
+            # --- Broadcast storm detection (multi-pattern) ---
+            is_global_broadcast = (
+                packet.npdu
+                and packet.npdu.destination_network == 0xFFFF
+            )
+
+            # Sub-type: Discovery flood (Who-Is=8, I-Am=0, Who-Has=7, I-Have=1)
             if packet.apdu and packet.apdu.pdu_type == 1:
-                if packet.apdu.service_choice in (0, 8):  # I-Am=0, Who-Is=8
+                if packet.apdu.service_choice in (0, 1, 7, 8):
+                    self._discovery_rate.add(ts)
                     self._broadcast_rate.add(ts)
-                    bc_rate = self._broadcast_rate.rate
-                    if bc_rate >= self._broadcast_pps:
+                    disc_rate = self._discovery_rate.rate
+                    if disc_rate >= self._broadcast_pps:
+                        services = "Who-Is/I-Am/Who-Has/I-Have"
                         a = self._maybe_alert(
                             AnomalyType.BROADCAST_STORM,
-                            f"Broadcast storm: Who-Is/I-Am at {bc_rate:.0f} pps",
+                            f"Broadcast storm: discovery flood ({services})"
+                            f" at {disc_rate:.0f} pps",
                             ts,
                             severity="critical",
-                            details={"rate_pps": round(bc_rate, 1)},
+                            details={
+                                "storm_type": "discovery",
+                                "rate_pps": round(disc_rate, 1),
+                                "global_broadcast": is_global_broadcast,
+                            },
+                            cooldown_subkey="discovery",
                         )
                         if a:
                             new_anomalies.append(a)
+
+            # Sub-type: Time sync flood (TimeSynchronization=6, UTC-TimeSynchronization=9)
+            if packet.apdu and packet.apdu.pdu_type == 1:
+                if packet.apdu.service_choice in (6, 9):
+                    self._timesync_rate.add(ts)
+                    self._broadcast_rate.add(ts)
+                    ts_rate = self._timesync_rate.rate
+                    if ts_rate >= self._timesync_pps:
+                        a = self._maybe_alert(
+                            AnomalyType.BROADCAST_STORM,
+                            f"Broadcast storm: time sync flood at {ts_rate:.0f} pps",
+                            ts,
+                            severity="critical",
+                            details={
+                                "storm_type": "timesync",
+                                "rate_pps": round(ts_rate, 1),
+                                "global_broadcast": is_global_broadcast,
+                            },
+                            cooldown_subkey="timesync",
+                        )
+                        if a:
+                            new_anomalies.append(a)
+
+            # Sub-type: Unconfirmed service flood (COV=2, WriteGroup=10)
+            if packet.apdu and packet.apdu.pdu_type == 1:
+                if packet.apdu.service_choice in (2, 10):
+                    self._unconfirmed_flood_rate.add(ts)
+                    self._broadcast_rate.add(ts)
+                    uf_rate = self._unconfirmed_flood_rate.rate
+                    if uf_rate >= self._unconfirmed_flood_pps:
+                        a = self._maybe_alert(
+                            AnomalyType.BROADCAST_STORM,
+                            f"Broadcast storm: unconfirmed service flood"
+                            f" (COV/WriteGroup) at {uf_rate:.0f} pps",
+                            ts,
+                            severity="critical",
+                            details={
+                                "storm_type": "unconfirmed",
+                                "rate_pps": round(uf_rate, 1),
+                                "global_broadcast": is_global_broadcast,
+                            },
+                            cooldown_subkey="unconfirmed",
+                        )
+                        if a:
+                            new_anomalies.append(a)
+
+            # Sub-type: Router discovery flood (NPDU network messages, no APDU)
+            # Who-Is-Router-To-Network=0x00, I-Am-Router-To-Network=0x01
+            if packet.npdu and packet.npdu.is_network_message:
+                if packet.npdu.network_message_type in (0x00, 0x01):
+                    self._router_discovery_rate.add(ts)
+                    self._broadcast_rate.add(ts)
+                    rd_rate = self._router_discovery_rate.rate
+                    if rd_rate >= self._router_discovery_pps:
+                        msg_name = packet.npdu.network_message_name or "router-discovery"
+                        a = self._maybe_alert(
+                            AnomalyType.BROADCAST_STORM,
+                            f"Broadcast storm: router discovery flood"
+                            f" ({msg_name}) at {rd_rate:.0f} pps",
+                            ts,
+                            severity="critical",
+                            details={
+                                "storm_type": "router",
+                                "rate_pps": round(rd_rate, 1),
+                                "global_broadcast": is_global_broadcast,
+                            },
+                            cooldown_subkey="router",
+                        )
+                        if a:
+                            new_anomalies.append(a)
+
+            # Aggregate: total broadcast-type traffic exceeds threshold
+            # (catches mixed storms that individually stay below sub-type thresholds)
+            agg_rate = self._broadcast_rate.rate
+            if agg_rate >= self._broadcast_pps:
+                # Only alert if no sub-type alert was already raised in this call
+                if not any(
+                    a.type == AnomalyType.BROADCAST_STORM for a in new_anomalies
+                ):
+                    a = self._maybe_alert(
+                        AnomalyType.BROADCAST_STORM,
+                        f"Broadcast storm: aggregate broadcast traffic"
+                        f" at {agg_rate:.0f} pps",
+                        ts,
+                        severity="critical",
+                        details={
+                            "storm_type": "aggregate",
+                            "rate_pps": round(agg_rate, 1),
+                            "global_broadcast": is_global_broadcast,
+                        },
+                        cooldown_subkey="aggregate",
+                    )
+                    if a:
+                        new_anomalies.append(a)
 
             # --- Error rate ---
             if packet.apdu and packet.apdu.pdu_type == 5:
@@ -255,6 +389,33 @@ class AnomalyDetector:
                     if a:
                         new_anomalies.append(a)
 
+            # --- Duplicate device ID (same instance from different IPs) ---
+            # Any packet with a Device-type object identifier (type 8) associates
+            # the source IP with that device instance. If two different IPs are
+            # seen referencing the same Device instance, flag it.
+            if packet.apdu and packet.apdu.object_identifier is not None:
+                obj_id = packet.apdu.object_identifier
+                if obj_id.object_type == 8:  # Device object type
+                    instance = obj_id.instance
+                    if instance not in self._instance_ips:
+                        self._instance_ips[instance] = set()
+                    self._instance_ips[instance].add(src_ip)
+                    if len(self._instance_ips[instance]) > 1:
+                        ips = sorted(self._instance_ips[instance])
+                        a = self._maybe_alert(
+                            AnomalyType.DUPLICATE_DEVICE_ID,
+                            f"Duplicate Device ID: instance {instance} claimed by {', '.join(ips)}",
+                            ts,
+                            source_ip=src_ip,
+                            severity="critical",
+                            details={
+                                "device_instance": instance,
+                                "ips": ips,
+                            },
+                        )
+                        if a:
+                            new_anomalies.append(a)
+
             # --- Foreign device registration failure ---
             if packet.bvlc and packet.bvlc.function == 0x00:
                 if packet.bvlc.result_code is not None and packet.bvlc.result_code != 0:
@@ -283,9 +444,16 @@ class AnomalyDetector:
         source_ip: str | None = None,
         severity: str = "warning",
         details: dict | None = None,
+        cooldown_subkey: str | None = None,
     ) -> Anomaly | None:
-        """Create an anomaly if cooldown period has elapsed for this type+source."""
-        key = (anomaly_type.value, source_ip)
+        """Create an anomaly if cooldown period has elapsed for this type+source.
+
+        Args:
+            cooldown_subkey: Optional extra discriminator for the cooldown key.
+                Allows independent cooldown tracking for sub-categories of the
+                same anomaly type (e.g., broadcast storm sub-types).
+        """
+        key = (anomaly_type.value, source_ip, cooldown_subkey)
         last = self._last_alert.get(key, 0.0)
         if timestamp - last < self._cooldown_seconds:
             return None
@@ -322,9 +490,14 @@ class AnomalyDetector:
         """Clear all anomaly state. Used when starting a new capture session."""
         with self._lock:
             self._per_ip_rates.clear()
+            self._discovery_rate = _RateWindow(window_seconds=self._window_seconds)
+            self._timesync_rate = _RateWindow(window_seconds=self._window_seconds)
+            self._unconfirmed_flood_rate = _RateWindow(window_seconds=self._window_seconds)
+            self._router_discovery_rate = _RateWindow(window_seconds=self._window_seconds)
             self._broadcast_rate = _RateWindow(window_seconds=self._window_seconds)
             self._error_rate = _RateWindow(window_seconds=self._window_seconds)
             self._reject_rate = _RateWindow(window_seconds=self._window_seconds)
             self._abort_rate = _RateWindow(window_seconds=self._window_seconds)
             self._anomalies.clear()
             self._last_alert.clear()
+            self._instance_ips.clear()
