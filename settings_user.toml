@@ -30,34 +30,28 @@ max_anomalies = 500
 
 # Per-source-IP packets/sec threshold. A single device exceeding this
 # # rate is flagged as "chatty."
-# default: 50.0
-chatty_pps = 5000.0
+chatty_pps = 50.0
 
 
 # ── Broadcast Storm ───────────────────────────────────────────
 
 # Discovery flood: Who-Is, I-Am, Who-Has, I-Have (pps).
-# default: 30.0
-broadcast_pps = 3000.0
+broadcast_pps = 30.0
 
 # TimeSynchronization / UTC-TimeSynchronization flood (pps).
-# default: 10.0
-timesync_pps = 1000.0
+timesync_pps = 10.0
 
 # UnconfirmedCOVNotification / WriteGroup flood (pps).
-# default: 30.0
-unconfirmed_flood_pps = 3000.0
+unconfirmed_flood_pps = 30.0
 
 # Router discovery flood: Who-Is-Router / I-Am-Router (pps).
-# default: 20.0
-router_discovery_pps = 2000.0
+router_discovery_pps = 20.0
 
 
 # ── Error / Reject / Abort Rates ──────────────────────────────
 
 # Aggregate error PDU rate (BACnet-Error responses, pps).
-# default: 10.0
-error_pps = 1000.0
+error_pps = 10.0
 
 # Aggregate reject PDU rate (BACnet-Reject responses, pps).
 reject_pps = 5.0

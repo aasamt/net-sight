@@ -31,6 +31,46 @@ from backend.models.packet import ParsedPacket
 
 logger = logging.getLogger(__name__)
 
+# ---------------------------------------------------------------------------
+# BACnet protocol constants (avoid magic numbers in detection logic)
+# ---------------------------------------------------------------------------
+
+# APDU PDU types (upper nibble of first APDU byte)
+PDU_TYPE_UNCONFIRMED_REQUEST = 1
+PDU_TYPE_ERROR = 5
+PDU_TYPE_REJECT = 6
+PDU_TYPE_ABORT = 7
+
+# Unconfirmed service choice codes
+SVC_I_AM = 0
+SVC_I_HAVE = 1
+SVC_UNCONFIRMED_COV_NOTIFICATION = 2
+SVC_TIME_SYNCHRONIZATION = 6
+SVC_WHO_HAS = 7
+SVC_WHO_IS = 8
+SVC_UTC_TIME_SYNCHRONIZATION = 9
+SVC_WRITE_GROUP = 10
+
+# Unconfirmed service groups (sets used for multi-pattern matching)
+DISCOVERY_SERVICES = frozenset({SVC_I_AM, SVC_I_HAVE, SVC_WHO_HAS, SVC_WHO_IS})
+TIME_SYNC_SERVICES = frozenset({SVC_TIME_SYNCHRONIZATION, SVC_UTC_TIME_SYNCHRONIZATION})
+UNCONFIRMED_FLOOD_SERVICES = frozenset({SVC_UNCONFIRMED_COV_NOTIFICATION, SVC_WRITE_GROUP})
+
+# NPDU network layer message types
+NET_MSG_WHO_IS_ROUTER = 0x00
+NET_MSG_I_AM_ROUTER = 0x01
+NET_MSG_REJECT_MESSAGE_TO_NETWORK = 0x03
+ROUTER_DISCOVERY_MESSAGES = frozenset({NET_MSG_WHO_IS_ROUTER, NET_MSG_I_AM_ROUTER})
+
+# BVLC function codes
+BVLC_RESULT = 0x00
+
+# BACnet object types
+OBJECT_TYPE_DEVICE = 8
+
+# NPDU addressing
+GLOBAL_BROADCAST_NETWORK = 0xFFFF
+
 
 class AnomalyType(str, Enum):
     """Categories of detectable anomalies."""
@@ -205,12 +245,12 @@ class AnomalyDetector:
             # --- Broadcast storm detection (multi-pattern) ---
             is_global_broadcast = (
                 packet.npdu
-                and packet.npdu.destination_network == 0xFFFF
+                and packet.npdu.destination_network == GLOBAL_BROADCAST_NETWORK
             )
 
-            # Sub-type: Discovery flood (Who-Is=8, I-Am=0, Who-Has=7, I-Have=1)
-            if packet.apdu and packet.apdu.pdu_type == 1:
-                if packet.apdu.service_choice in (0, 1, 7, 8):
+            # Sub-type: Discovery flood (Who-Is, I-Am, Who-Has, I-Have)
+            if packet.apdu and packet.apdu.pdu_type == PDU_TYPE_UNCONFIRMED_REQUEST:
+                if packet.apdu.service_choice in DISCOVERY_SERVICES:
                     self._discovery_rate.add(ts)
                     self._broadcast_rate.add(ts)
                     disc_rate = self._discovery_rate.rate
@@ -232,9 +272,9 @@ class AnomalyDetector:
                         if a:
                             new_anomalies.append(a)
 
-            # Sub-type: Time sync flood (TimeSynchronization=6, UTC-TimeSynchronization=9)
-            if packet.apdu and packet.apdu.pdu_type == 1:
-                if packet.apdu.service_choice in (6, 9):
+            # Sub-type: Time sync flood
+            if packet.apdu and packet.apdu.pdu_type == PDU_TYPE_UNCONFIRMED_REQUEST:
+                if packet.apdu.service_choice in TIME_SYNC_SERVICES:
                     self._timesync_rate.add(ts)
                     self._broadcast_rate.add(ts)
                     ts_rate = self._timesync_rate.rate
@@ -254,9 +294,9 @@ class AnomalyDetector:
                         if a:
                             new_anomalies.append(a)
 
-            # Sub-type: Unconfirmed service flood (COV=2, WriteGroup=10)
-            if packet.apdu and packet.apdu.pdu_type == 1:
-                if packet.apdu.service_choice in (2, 10):
+            # Sub-type: Unconfirmed service flood (COV, WriteGroup)
+            if packet.apdu and packet.apdu.pdu_type == PDU_TYPE_UNCONFIRMED_REQUEST:
+                if packet.apdu.service_choice in UNCONFIRMED_FLOOD_SERVICES:
                     self._unconfirmed_flood_rate.add(ts)
                     self._broadcast_rate.add(ts)
                     uf_rate = self._unconfirmed_flood_rate.rate
@@ -278,9 +318,8 @@ class AnomalyDetector:
                             new_anomalies.append(a)
 
             # Sub-type: Router discovery flood (NPDU network messages, no APDU)
-            # Who-Is-Router-To-Network=0x00, I-Am-Router-To-Network=0x01
             if packet.npdu and packet.npdu.is_network_message:
-                if packet.npdu.network_message_type in (0x00, 0x01):
+                if packet.npdu.network_message_type in ROUTER_DISCOVERY_MESSAGES:
                     self._router_discovery_rate.add(ts)
                     self._broadcast_rate.add(ts)
                     rd_rate = self._router_discovery_rate.rate
@@ -327,7 +366,7 @@ class AnomalyDetector:
                         new_anomalies.append(a)
 
             # --- Error rate ---
-            if packet.apdu and packet.apdu.pdu_type == 5:
+            if packet.apdu and packet.apdu.pdu_type == PDU_TYPE_ERROR:
                 self._error_rate.add(ts)
                 err_rate = self._error_rate.rate
                 if err_rate >= self._error_pps:
@@ -342,7 +381,7 @@ class AnomalyDetector:
                         new_anomalies.append(a)
 
             # --- Reject rate ---
-            if packet.apdu and packet.apdu.pdu_type == 6:
+            if packet.apdu and packet.apdu.pdu_type == PDU_TYPE_REJECT:
                 self._reject_rate.add(ts)
                 rej_rate = self._reject_rate.rate
                 if rej_rate >= self._reject_pps:
@@ -357,7 +396,7 @@ class AnomalyDetector:
                         new_anomalies.append(a)
 
             # --- Abort rate ---
-            if packet.apdu and packet.apdu.pdu_type == 7:
+            if packet.apdu and packet.apdu.pdu_type == PDU_TYPE_ABORT:
                 self._abort_rate.add(ts)
                 abt_rate = self._abort_rate.rate
                 if abt_rate >= self._abort_pps:
@@ -373,7 +412,7 @@ class AnomalyDetector:
 
             # --- Routing issue (Reject-Message-To-Network) ---
             if packet.npdu and packet.npdu.is_network_message:
-                if packet.npdu.network_message_type == 0x03:
+                if packet.npdu.network_message_type == NET_MSG_REJECT_MESSAGE_TO_NETWORK:
                     reason = packet.npdu.reject_reason_name or "unknown"
                     a = self._maybe_alert(
                         AnomalyType.ROUTING_ISSUE,
@@ -395,7 +434,7 @@ class AnomalyDetector:
             # seen referencing the same Device instance, flag it.
             if packet.apdu and packet.apdu.object_identifier is not None:
                 obj_id = packet.apdu.object_identifier
-                if obj_id.object_type == 8:  # Device object type
+                if obj_id.object_type == OBJECT_TYPE_DEVICE:
                     instance = obj_id.instance
                     if instance not in self._instance_ips:
                         self._instance_ips[instance] = set()
@@ -417,7 +456,7 @@ class AnomalyDetector:
                             new_anomalies.append(a)
 
             # --- Foreign device registration failure ---
-            if packet.bvlc and packet.bvlc.function == 0x00:
+            if packet.bvlc and packet.bvlc.function == BVLC_RESULT:
                 if packet.bvlc.result_code is not None and packet.bvlc.result_code != 0:
                     result_name = packet.bvlc.result_name or f"0x{packet.bvlc.result_code:04X}"
                     a = self._maybe_alert(

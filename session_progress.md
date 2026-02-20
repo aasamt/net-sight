@@ -299,7 +299,7 @@ After reading these files, tell me what has been completed and what the next imp
 ---
 
 ### Phase 5g: User-Adjustable Settings File
-- [x] Created `settings.toml` at project root — TOML format, fully commented (later split into `user_settings.toml` + `default_settings.toml`)
+- [x] Created `settings.toml` at project root — TOML format, fully commented (later split into `settings_user.toml` + `default_settings.toml`)
   - All anomaly detection thresholds configurable: `chatty_pps`, `broadcast_pps`, `timesync_pps`, `unconfirmed_flood_pps`, `router_discovery_pps`, `error_pps`, `reject_pps`, `abort_pps`
   - General parameters: `window_seconds`, `cooldown_seconds`, `max_anomalies`
 - [x] Created `backend/settings.py` — settings loader module
@@ -308,7 +308,7 @@ After reading these files, tell me what has been completed and what the next imp
   - Type validation with coercion (int→float), unknown key warnings, malformed file resilience
   - File is optional — missing/deleted file uses built-in defaults
 - [x] Added `--settings TOML` CLI flag to `backend/main.py`
-  - Default: auto-detects `user_settings.toml` from project root
+  - Default: auto-detects `settings_user.toml` from project root
   - `AnomalyDetector` now instantiated with `**settings.anomaly_kwargs()`
 - [x] Updated `samples/gen_broadcast_storm.py` — increased burst intensity so all 3 sub-types (discovery, timesync, router) trigger with default thresholds
   - TimeSynchronization: 160 packets over 8s (~20 pps)
@@ -332,15 +332,15 @@ After reading these files, tell me what has been completed and what the next imp
   - Status line for feedback messages
 - [x] Settings tab added to TUI (`TabPane` in `TabbedContent`)
   - Settings loaded from file on mount
-  - Save button: validates inputs, updates running `AnomalyDetector`, writes to `user_settings.toml`
-  - Reset button: copies `default_settings.toml` into `user_settings.toml`, updates detector + UI
+  - Save button: validates inputs, updates running `AnomalyDetector`, writes to `settings_user.toml`
+  - Reset button: copies `default_settings.toml` into `settings_user.toml`, updates detector + UI
   - Changes take effect immediately on the running anomaly detector
 - [x] `save_settings()` function in `backend/settings.py`
   - Generates well-commented TOML grouped by category
   - Marks non-default values with `# default: X` comments
   - Round-trip safe: save → load produces identical values
 - [x] `get_defaults()` function reads from `default_settings.toml` (falls back to dataclass defaults)
-- [x] `reset_to_defaults()` function copies `default_settings.toml` content into `user_settings.toml`
+- [x] `reset_to_defaults()` function copies `default_settings.toml` content into `settings_user.toml`
 - [x] `--settings` CLI flag wired through `run_tui()` to TUI app
 - [x] Textual CSS styles for settings tab layout
 - [x] 11 new tests (5 save_settings + 1 get_defaults + 5 TUI settings integration)
@@ -536,7 +536,7 @@ After reading these files, tell me what has been completed and what the next imp
 | 2026-02-19 | Phase 5f complete — Enhanced broadcast storm detection: 4 sub-type patterns (discovery, timesync, unconfirmed, router) + aggregate; multi-pattern sample pcap; 171 tests passing |
 | 2026-02-19 | Phase 5g complete — User-adjustable settings.toml; settings loader with validation/fallback; --settings CLI flag; per-sub-type cooldowns; pcap burst intensity increased; 183 tests passing |
 | 2026-02-19 | Phase 5h complete — TUI Settings tab: SettingsPanel widget, save/reset buttons, live detector updates, save_settings() TOML writer, get_defaults(); 194 tests passing |
-| 2026-02-19 | Settings restructured to two-file architecture: user_settings.toml (active) + default_settings.toml (immutable defaults); reset_to_defaults() copies defaults to user file; 197 tests passing |
+| 2026-02-19 | Settings restructured to two-file architecture: settings_user.toml (active) + default_settings.toml (immutable defaults); reset_to_defaults() copies defaults to user file; 197 tests passing |
 
 ---
 

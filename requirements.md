@@ -106,7 +106,7 @@ NetSight is a cross-platform desktop application that passively captures BACnet/
 | FR-ANO-04 | Detect network congestion (overall traffic rate exceeding threshold) | P1 |
 | FR-ANO-05 | Detect routing issues (Reject-Message-To-Network occurrences) | P1 |
 | FR-ANO-06 | Detect foreign device registration failures (BVLC NAKs) | P1 |
-| FR-ANO-07 | Allow user-configurable thresholds for anomaly detection via `user_settings.toml` and TUI Settings tab | P0 |
+| FR-ANO-07 | Allow user-configurable thresholds for anomaly detection via `settings_user.toml` and TUI Settings tab | P0 |
 | FR-ANO-08 | Display anomalies with severity level, device, description, timestamp | P0 |
 | FR-ANO-09 | Detect duplicate BACnet device IDs (same instance number from multiple IPs) | P0 |
 
@@ -466,5 +466,5 @@ The architecture must support adding RS-485 serial capture without restructuring
 | Interface support | Single interface | Sufficient for MVP; multi-interface is future |
 | Python version | 3.12+ | Latest stable, best async performance |
 | App name | NetSight | User-selected |
-| Configuration format | TOML (`user_settings.toml` + `default_settings.toml`) | Human-readable, Python stdlib `tomllib` in 3.11+, comments supported |
-| Settings persistence | Two-file architecture — `user_settings.toml` (active) + `default_settings.toml` (immutable defaults) | Editable by hand or via TUI; reset copies defaults to user file; survives restarts |
+| Configuration format | TOML (`settings_user.toml` + `default_settings.toml`) | Human-readable, Python stdlib `tomllib` in 3.11+, comments supported |
+| Settings persistence | Two-file architecture — `settings_user.toml` (active) + `default_settings.toml` (immutable defaults) | Editable by hand or via TUI; reset copies defaults to user file; survives restarts |

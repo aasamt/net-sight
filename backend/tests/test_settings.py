@@ -244,8 +244,20 @@ cooldown_seconds = 0.0
 # ---------------------------------------------------------------------------
 
 
-def test_get_defaults():
+def test_get_defaults(tmp_path, monkeypatch):
     """get_defaults() returns AnomalySettings with all built-in values."""
+    import backend.settings as _mod
+
+    # Write a defaults file with known values
+    default_file = tmp_path / "default_settings.toml"
+    default_file.write_text(
+        "[anomaly_detection]\n"
+        "chatty_pps = 50.0\n"
+        "broadcast_pps = 30.0\n"
+        "window_seconds = 10.0\n"
+    )
+    monkeypatch.setattr(_mod, "_DEFAULT_SETTINGS_PATH", default_file)
+
     defaults = get_defaults()
     assert isinstance(defaults, AnomalySettings)
     assert defaults.chatty_pps == 50.0
@@ -330,11 +342,11 @@ def test_save_uses_settings_path_if_set():
 
 
 def test_reset_to_defaults(tmp_path, monkeypatch):
-    """reset_to_defaults copies default_settings.toml into user_settings.toml."""
+    """reset_to_defaults copies default_settings.toml into settings_user.toml."""
     import backend.settings as _mod
 
     default_file = tmp_path / "default_settings.toml"
-    user_file = tmp_path / "user_settings.toml"
+    user_file = tmp_path / "settings_user.toml"
 
     # Write a defaults file with known values
     default_file.write_text(
@@ -353,7 +365,7 @@ def test_reset_to_defaults(tmp_path, monkeypatch):
     assert result.anomaly.chatty_pps == 50.0
     assert result.anomaly.broadcast_pps == 30.0
 
-    # Verify user_settings.toml was overwritten
+    # Verify settings_user.toml was overwritten
     reloaded = load_settings(user_file)
     assert reloaded.anomaly.chatty_pps == 50.0
 

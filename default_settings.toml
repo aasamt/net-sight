@@ -4,7 +4,7 @@
 # This file contains the built-in default values for all settings.
 # It is used as the reference when resetting to defaults.
 #
-# To customize settings, edit user_settings.toml instead.
+# To customize settings, edit settings_user.toml instead.
 # ────────────────────────────────────────────────────────────────────
 
 [anomaly_detection]

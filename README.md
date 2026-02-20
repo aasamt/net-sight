@@ -23,7 +23,7 @@ uv run python -m backend.main -f capture.pcap --plain
 uv run python -m backend.main --serve
 
 # Use a custom settings file
-uv run python -m backend.main -f capture.pcap --settings my_user_settings.toml
+uv run python -m backend.main -f capture.pcap --settings my_settings_user.toml
 
 # Run tests
 uv run python -m pytest backend/tests/
@@ -41,17 +41,17 @@ Keyboard shortcuts: **Q** quit, **P** pause/resume, **S** save packets to JSONL.
 
 ## Settings
 
-Anomaly detection thresholds are configurable via `user_settings.toml` in the project root. Edit the file directly or use the TUI Settings tab.
+Anomaly detection thresholds are configurable via `settings_user.toml` in the project root. Edit the file directly or use the TUI Settings tab.
 
 Configurable parameters include: chatty device threshold, broadcast storm sub-type thresholds (discovery, timesync, unconfirmed, router), error/reject/abort rates, sliding window duration, alert cooldown, and max anomaly records.
 
-Built-in defaults are stored in `default_settings.toml` (do not edit). To restore defaults, use the "Reset to Defaults" button in the TUI Settings tab, which copies `default_settings.toml` into `user_settings.toml`.
+Built-in defaults are stored in `default_settings.toml` (do not edit). To restore defaults, use the "Reset to Defaults" button in the TUI Settings tab, which copies `default_settings.toml` into `settings_user.toml`.
 
 ## Project Structure
 
 ```
 backend/                Python 3.12+ — capture, parsing, analysis, TUI, settings, CLI
-user_settings.toml      Active user settings (TOML, editable)
+settings_user.toml      Active user settings (TOML, editable)
 default_settings.toml   Built-in default settings (TOML, do not edit)
 samples/                Sample pcap files for testing and development
 frontend/         React + TypeScript + Vite (later phases)

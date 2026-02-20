@@ -115,7 +115,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--settings",
         metavar="TOML",
         default=None,
-        help="Path to user_settings.toml (default: auto-detect from project root)",
+        help="Path to settings_user.toml (default: auto-detect from project root)",
     )
 
     # Utility

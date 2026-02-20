@@ -2,7 +2,7 @@
 
 NetSight uses two settings files at the project root:
 
-- ``user_settings.toml``    — active settings the app reads from. Editable by
+- ``settings_user.toml``    — active settings the app reads from. Editable by
   the user directly or via the TUI Settings tab.
 - ``default_settings.toml`` — immutable reference of built-in defaults. Used
   only when the user resets to defaults.
@@ -11,7 +11,7 @@ Usage::
 
     from backend.settings import load_settings, save_settings, reset_to_defaults
 
-    settings = load_settings()                          # reads user_settings.toml
+    settings = load_settings()                          # reads settings_user.toml
     settings = load_settings("custom.toml")            # explicit path
     settings = load_settings(None)                      # pure defaults (no file)
 
@@ -19,7 +19,7 @@ Usage::
 
     # Modify and persist
     settings.anomaly.chatty_pps = 100.0
-    save_settings(settings)                              # writes user_settings.toml
+    save_settings(settings)                              # writes settings_user.toml
 
     # Reset to defaults
     settings = reset_to_defaults()                       # copies default → user
@@ -37,7 +37,7 @@ logger = logging.getLogger(__name__)
 
 # Project root: two levels up from this file (backend/settings.py → repo root)
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
-_USER_SETTINGS_PATH = _PROJECT_ROOT / "user_settings.toml"
+_USER_SETTINGS_PATH = _PROJECT_ROOT / "settings_user.toml"
 _DEFAULT_SETTINGS_PATH = _PROJECT_ROOT / "default_settings.toml"
 
 
@@ -113,7 +113,7 @@ def load_settings(path: str | Path | None = _USER_SETTINGS_PATH) -> Settings:
     """Load settings from a TOML file, falling back to defaults.
 
     Args:
-        path: Path to settings file. Defaults to ``user_settings.toml``
+        path: Path to settings file. Defaults to ``settings_user.toml``
               in the project root. If ``None``, returns pure defaults
               without reading any file. If the file doesn't exist, logs
               a debug message and returns defaults.
@@ -190,7 +190,7 @@ def reset_to_defaults() -> Settings:
     """Reset user settings to defaults.
 
     Reads ``default_settings.toml``, writes its contents to
-    ``user_settings.toml``, and returns the resulting ``Settings``.
+    ``settings_user.toml``, and returns the resulting ``Settings``.
     """
     defaults = get_defaults()
     settings = Settings(anomaly=defaults, settings_path=str(_USER_SETTINGS_PATH))

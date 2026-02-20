@@ -26,6 +26,7 @@ _DIRECT_RUN = __name__ == "__main__"
 
 from backend.main import build_parser, run_tui
 from backend.models.packet import ParsedPacket
+from backend.settings import Settings
 from backend.tui.app import NetSightApp
 from backend.tui.widgets import (
     AnomalyLog,
@@ -43,7 +44,7 @@ from backend.transport.pcap_replay import PcapReplayCapture
 # ---------------------------------------------------------------------------
 
 SAMPLE_PCAP = os.path.join(
-    os.path.dirname(__file__), "..", "..", "samples", "test_bacnet.pcap"
+    os.path.dirname(__file__), "fixtures", "test_bacnet.pcap"
 )
 
 
@@ -59,6 +60,7 @@ def _make_app(**kwargs: object) -> NetSightApp:
         "is_live": False,
         "source_name": "test_bacnet.pcap",
         "max_rows": 50,
+        "settings": Settings(),  # pure defaults, independent of settings_user.toml
     }
     defaults.update(kwargs)
     return NetSightApp(transport, **defaults)
@@ -400,13 +402,23 @@ class TestSettingsTab:
             assert values["chatty_pps"] == 75.0
             await pilot.press("q")
 
-    async def test_settings_reset_restores_defaults(self) -> None:
+    async def test_settings_reset_restores_defaults(self, tmp_path, monkeypatch) -> None:
         """Reset button should restore all values to defaults."""
-        from backend.settings import Settings
+        import backend.settings as _mod
+
         from textual.widgets import Button
+
+        # Isolate from real settings files
+        default_file = tmp_path / "default_settings.toml"
+        user_file = tmp_path / "settings_user.toml"
+        default_file.write_text("[anomaly_detection]\nchatty_pps = 50.0\n")
+        user_file.write_text("[anomaly_detection]\nchatty_pps = 999.0\n")
+        monkeypatch.setattr(_mod, "_DEFAULT_SETTINGS_PATH", default_file)
+        monkeypatch.setattr(_mod, "_USER_SETTINGS_PATH", user_file)
 
         settings = Settings()
         settings.anomaly.chatty_pps = 999.0
+        settings.settings_path = str(user_file)
         app = _make_app(settings=settings)
         async with app.run_test(size=(120, 40)) as pilot:
             await asyncio.sleep(0.5)
