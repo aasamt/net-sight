@@ -51,7 +51,7 @@ backend/                     # Python 3.12+, FastAPI
   tests/                     # Parser, analysis, settings, TUI, and CLI unit tests
 settings.toml                # User-adjustable anomaly detection thresholds (project root)
 settings_user.toml           # Active user settings (editable)
-default_settings.toml        # Built-in default settings (do not edit)
+settings_default.toml        # Built-in default settings (do not edit)
 samples/                     # Sample pcap files for testing and development
 frontend/                    # Vite + React 18+ + TypeScript 5+ (later phases)
 electron/                    # main.ts (spawn Python), preload.ts (IPC bridge) (later phases)
@@ -63,7 +63,7 @@ electron/                    # main.ts (spawn Python), preload.ts (IPC bridge) (
 - **Parser separation:** One module per BACnet layer — `bvlc.py`, `npdu.py`, `apdu.py`. Each returns a Pydantic model. `pipeline.py` orchestrates the full decode.
 - **Analysis separation:** One module per concern — `device_registry.py`, `traffic_stats.py`, `anomaly_detector.py`. All fed from the same parsed packet stream.
 - **Models:** Use Pydantic for all data models (`BVLCMessage`, `NPDUMessage`, `APDUMessage`, `ParsedPacket`).
-- **Settings:** Two-file architecture at project root — `settings_user.toml` (active, editable) and `default_settings.toml` (immutable reference). `backend/settings.py` loads from `settings_user.toml`, saves to `settings_user.toml`, and `reset_to_defaults()` copies `default_settings.toml` into `settings_user.toml`. The TUI Settings tab provides live editing with Save and Reset to Defaults. Settings persist across sessions.
+- **Settings:** Two-file architecture at project root — `settings_user.toml` (active, editable) and `settings_default.toml` (immutable reference). `backend/settings.py` loads from `settings_user.toml`, saves to `settings_user.toml`, and `reset_to_defaults()` copies `settings_default.toml` into `settings_user.toml`. The TUI Settings tab provides live editing with Save and Reset to Defaults. Settings persist across sessions.
 - **Scapy config:** Always use `store=False`, BPF filter `udp port 47808`, immediate mode. Minimize work in `prn` callback — queue raw data only.
 - **Queue backpressure:** Drop oldest on overflow (`put_nowait` with `QueueFull` exception swallowed), never block the capture thread.
 - **Backend security:** FastAPI binds to `127.0.0.1` only. No external access.

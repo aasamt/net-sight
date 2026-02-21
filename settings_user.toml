@@ -8,7 +8,7 @@
 # Time values are in seconds.
 #
 # To restore defaults, use the TUI Settings tab "Reset to Defaults"
-# button, which copies default_settings.toml into this file.
+# button, which copies settings_default.toml into this file.
 # ────────────────────────────────────────────────────────────────────
 
 [anomaly_detection]

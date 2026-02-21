@@ -443,7 +443,7 @@ class NetSightApp(App):
             self.notify(f"Settings save failed: {e}", severity="error")
 
     def _reset_settings_to_defaults(self) -> None:
-        """Reset all settings to built-in defaults (from default_settings.toml)."""
+        """Reset all settings to built-in defaults (from settings_default.toml)."""
         try:
             result = reset_to_defaults()
             self._settings.anomaly = result.anomaly

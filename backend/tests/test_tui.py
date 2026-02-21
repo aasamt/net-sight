@@ -409,7 +409,7 @@ class TestSettingsTab:
         from textual.widgets import Button
 
         # Isolate from real settings files
-        default_file = tmp_path / "default_settings.toml"
+        default_file = tmp_path / "settings_default.toml"
         user_file = tmp_path / "settings_user.toml"
         default_file.write_text("[anomaly_detection]\nchatty_pps = 50.0\n")
         user_file.write_text("[anomaly_detection]\nchatty_pps = 999.0\n")

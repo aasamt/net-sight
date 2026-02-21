@@ -45,14 +45,14 @@ Anomaly detection thresholds are configurable via `settings_user.toml` in the pr
 
 Configurable parameters include: chatty device threshold, broadcast storm sub-type thresholds (discovery, timesync, unconfirmed, router), error/reject/abort rates, sliding window duration, alert cooldown, and max anomaly records.
 
-Built-in defaults are stored in `default_settings.toml` (do not edit). To restore defaults, use the "Reset to Defaults" button in the TUI Settings tab, which copies `default_settings.toml` into `settings_user.toml`.
+Built-in defaults are stored in `settings_default.toml` (do not edit). To restore defaults, use the "Reset to Defaults" button in the TUI Settings tab, which copies `settings_default.toml` into `settings_user.toml`.
 
 ## Project Structure
 
 ```
 backend/                Python 3.12+ — capture, parsing, analysis, TUI, settings, CLI
 settings_user.toml      Active user settings (TOML, editable)
-default_settings.toml   Built-in default settings (TOML, do not edit)
+settings_default.toml   Built-in default settings (TOML, do not edit)
 samples/                Sample pcap files for testing and development
 frontend/         React + TypeScript + Vite (later phases)
 electron/         Electron desktop shell (later phases)

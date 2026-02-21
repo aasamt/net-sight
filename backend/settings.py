@@ -4,7 +4,7 @@ NetSight uses two settings files at the project root:
 
 - ``settings_user.toml``    — active settings the app reads from. Editable by
   the user directly or via the TUI Settings tab.
-- ``default_settings.toml`` — immutable reference of built-in defaults. Used
+- ``settings_default.toml`` — immutable reference of built-in defaults. Used
   only when the user resets to defaults.
 
 Usage::
@@ -38,7 +38,7 @@ logger = logging.getLogger(__name__)
 # Project root: two levels up from this file (backend/settings.py → repo root)
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 _USER_SETTINGS_PATH = _PROJECT_ROOT / "settings_user.toml"
-_DEFAULT_SETTINGS_PATH = _PROJECT_ROOT / "default_settings.toml"
+_DEFAULT_SETTINGS_PATH = _PROJECT_ROOT / "settings_default.toml"
 
 
 # ---------------------------------------------------------------------------
@@ -176,7 +176,7 @@ def load_settings(path: str | Path | None = _USER_SETTINGS_PATH) -> Settings:
 def get_defaults() -> AnomalySettings:
     """Return a fresh ``AnomalySettings`` with built-in defaults.
 
-    If ``default_settings.toml`` exists, reads values from it so that
+    If ``settings_default.toml`` exists, reads values from it so that
     the single source of truth for defaults is the file.  Falls back
     to the dataclass defaults if the file is missing.
     """
@@ -189,7 +189,7 @@ def get_defaults() -> AnomalySettings:
 def reset_to_defaults() -> Settings:
     """Reset user settings to defaults.
 
-    Reads ``default_settings.toml``, writes its contents to
+    Reads ``settings_default.toml``, writes its contents to
     ``settings_user.toml``, and returns the resulting ``Settings``.
     """
     defaults = get_defaults()
@@ -282,7 +282,7 @@ def save_settings(settings: Settings, path: str | Path | None = None) -> Path:
         "# Time values are in seconds.",
         "#",
         "# To restore defaults, use the TUI Settings tab \"Reset to Defaults\"",
-        "# button, which copies default_settings.toml into this file.",
+        "# button, which copies settings_default.toml into this file.",
         "# " + "─" * 68,
         "",
         "[anomaly_detection]",

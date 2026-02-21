@@ -275,7 +275,7 @@ async def run_capture(args: argparse.Namespace) -> None:
     loop = asyncio.get_running_loop()
 
     # --- Settings ---
-    settings = load_settings(args.settings)
+    settings = load_settings(args.settings) if args.settings else load_settings()
     if settings.settings_path:
         logger.info("Loaded settings from %s", settings.settings_path)
 
@@ -477,7 +477,7 @@ def run_tui(args: argparse.Namespace) -> None:
     from backend.tui.app import NetSightApp
 
     # Load settings
-    settings = load_settings(args.settings)
+    settings = load_settings(args.settings) if args.settings else load_settings()
 
     is_live = bool(args.interface)
 

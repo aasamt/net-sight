@@ -249,7 +249,7 @@ def test_get_defaults(tmp_path, monkeypatch):
     import backend.settings as _mod
 
     # Write a defaults file with known values
-    default_file = tmp_path / "default_settings.toml"
+    default_file = tmp_path / "settings_default.toml"
     default_file.write_text(
         "[anomaly_detection]\n"
         "chatty_pps = 50.0\n"
@@ -342,10 +342,10 @@ def test_save_uses_settings_path_if_set():
 
 
 def test_reset_to_defaults(tmp_path, monkeypatch):
-    """reset_to_defaults copies default_settings.toml into settings_user.toml."""
+    """reset_to_defaults copies settings_default.toml into settings_user.toml."""
     import backend.settings as _mod
 
-    default_file = tmp_path / "default_settings.toml"
+    default_file = tmp_path / "settings_default.toml"
     user_file = tmp_path / "settings_user.toml"
 
     # Write a defaults file with known values
@@ -371,10 +371,10 @@ def test_reset_to_defaults(tmp_path, monkeypatch):
 
 
 def test_get_defaults_reads_default_settings_file(tmp_path, monkeypatch):
-    """get_defaults reads from default_settings.toml when it exists."""
+    """get_defaults reads from settings_default.toml when it exists."""
     import backend.settings as _mod
 
-    default_file = tmp_path / "default_settings.toml"
+    default_file = tmp_path / "settings_default.toml"
     default_file.write_text(
         "[anomaly_detection]\nchatty_pps = 50.0\nwindow_seconds = 10.0\n"
     )

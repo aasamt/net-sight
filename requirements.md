@@ -466,5 +466,5 @@ The architecture must support adding RS-485 serial capture without restructuring
 | Interface support | Single interface | Sufficient for MVP; multi-interface is future |
 | Python version | 3.12+ | Latest stable, best async performance |
 | App name | NetSight | User-selected |
-| Configuration format | TOML (`settings_user.toml` + `default_settings.toml`) | Human-readable, Python stdlib `tomllib` in 3.11+, comments supported |
-| Settings persistence | Two-file architecture — `settings_user.toml` (active) + `default_settings.toml` (immutable defaults) | Editable by hand or via TUI; reset copies defaults to user file; survives restarts |
+| Configuration format | TOML (`settings_user.toml` + `settings_default.toml`) | Human-readable, Python stdlib `tomllib` in 3.11+, comments supported |
+| Settings persistence | Two-file architecture — `settings_user.toml` (active) + `settings_default.toml` (immutable defaults) | Editable by hand or via TUI; reset copies defaults to user file; survives restarts |
