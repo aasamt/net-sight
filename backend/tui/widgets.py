@@ -20,6 +20,8 @@ from textual.app import ComposeResult
 from textual.containers import Horizontal, VerticalScroll
 from textual.widgets import Button, DataTable, Input, Label, Static
 
+from backend.analysis.packet_inspector import render_apdu_detail, render_transport_detail
+
 if TYPE_CHECKING:
     from backend.models.packet import ParsedPacket
 
@@ -165,152 +167,18 @@ class PacketDetailPanel(Static):
             )
 
     def show_packet(self, packet: ParsedPacket) -> None:
-        """Render full decoded detail for the given packet."""
-        # ── Left side: APDU / application layer detail ──
-        lines: list[str] = []
+        """Render full decoded detail for the given packet.
 
-        # Header
-        ts = datetime.datetime.fromtimestamp(
-            packet.timestamp, tz=datetime.timezone.utc
-        ).strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
-        lines.append(f"  Packet #{packet.id}  |  {ts} UTC  |  {packet.length} bytes")
-        lines.append(f"  {packet.effective_source_ip}:{packet.effective_source_port}"
-                     f" → {packet.destination_ip}:{packet.destination_port}")
-        if packet.parse_error:
-            lines.append(f"  ⚠ Parse error: {packet.parse_error}")
-        lines.append("")
-
-        # APDU Layer
-        lines.append("  ─── APDU Layer ───")
-        if packet.apdu:
-            a = packet.apdu
-            lines.append(f"  PDU Type:      {a.pdu_type} ({a.pdu_type_name})")
-            if a.service_choice is not None:
-                lines.append(f"  Service:       {a.service_choice} ({a.service_name})")
-            lines.append(f"  Confirmed:     {a.is_confirmed}")
-            if a.invoke_id is not None:
-                lines.append(f"  Invoke ID:     {a.invoke_id}")
-            if a.segmented:
-                lines.append(f"  Segmented:     Yes (more={a.more_follows},"
-                             f" seq={a.sequence_number}, win={a.window_size})")
-            if a.max_segments is not None:
-                lines.append(f"  Max Segments:  {a.max_segments}")
-            if a.max_apdu_length is not None:
-                lines.append(f"  Max APDU Len:  {a.max_apdu_length}")
-            if a.object_identifier:
-                obj = a.object_identifier
-                lines.append(f"  Object:        {obj.object_type_name}"
-                             f" (type={obj.object_type},"
-                             f" instance={obj.instance})")
-            if a.property_identifier is not None:
-                prop_line = (f"  Property:      {a.property_identifier}"
-                             f" ({a.property_name})")
-                if a.property_array_index is not None:
-                    prop_line += f" [index={a.property_array_index}]"
-                lines.append(prop_line)
-            if a.iam_fields:
-                iam = a.iam_fields
-                lines.append("")
-                lines.append("  ─── I-Am Detail ───")
-                lines.append(f"  Device Instance:   {iam.device_instance}")
-                lines.append(f"  Max APDU Length:   {iam.max_apdu_length}")
-                lines.append(f"  Segmentation:      {iam.segmentation_supported}"
-                             f" ({iam.segmentation_name})")
-                lines.append(f"  Vendor ID:         {iam.vendor_id}")
-            if a.who_is_range:
-                wh = a.who_is_range
-                lines.append("")
-                lines.append("  ─── Who-Is Range ───")
-                lines.append(f"  Low Limit:         {wh.low_limit}")
-                lines.append(f"  High Limit:        {wh.high_limit}")
-            if a.error_class is not None:
-                lines.append(f"  Error Class:   {a.error_class}"
-                             f" ({a.error_class_name})")
-                lines.append(f"  Error Code:    {a.error_code}")
-            if a.reject_reason is not None:
-                lines.append(f"  Reject Reason: {a.reject_reason}"
-                             f" ({a.reject_reason_name})")
-            if a.abort_reason is not None:
-                lines.append(f"  Abort Reason:  {a.abort_reason}"
-                             f" ({a.abort_reason_name})")
-        elif packet.npdu and packet.npdu.is_network_message:
-            lines.append("  (network layer message — no APDU)")
-        else:
-            lines.append("  (not decoded)")
-
-        # Update left side
+        Delegates to packet_inspector for consistent rendering across
+        TUI and other output modes.
+        """
+        # Left side: APDU / application layer detail
         content = self.query_one("#detail-content", Label)
-        content.update("\n".join(lines))
+        content.update(render_apdu_detail(packet))
 
-        # ── Right side: raw hex + BVLC + NPDU ──
-        rlines: list[str] = []
-
-        # Raw Hex Dump
-        rlines.append("  ─── Raw Bytes ───")
-        rlines.extend(self._hex_dump(bytes.fromhex(packet.raw_hex)))
-        rlines.append("")
-
-        # BVLC Layer
-        rlines.append("  ─── BVLC Layer ───")
-        if packet.bvlc:
-            b = packet.bvlc
-            rlines.append(f"  Type:          0x{b.type:02X} (BACnet/IPv4)")
-            rlines.append(f"  Function:      0x{b.function:02X} ({b.function_name})")
-            rlines.append(f"  Length:        {b.length} bytes")
-            if b.originating_ip:
-                rlines.append(f"  Originator:    {b.originating_ip}:{b.originating_port}")
-            if b.result_code is not None:
-                rlines.append(f"  Result:        0x{b.result_code:04X}"
-                              f" ({b.result_name or 'Unknown'})")
-            if b.ttl is not None:
-                rlines.append(f"  TTL:           {b.ttl}s")
-        else:
-            rlines.append("  (not decoded)")
-        rlines.append("")
-
-        # NPDU Layer
-        rlines.append("  ─── NPDU Layer ───")
-        if packet.npdu:
-            n = packet.npdu
-            rlines.append(f"  Version:       0x{n.version:02X}")
-            rlines.append(f"  Message Type:  {'Network' if n.is_network_message else 'APDU'}")
-            rlines.append(f"  Expecting Reply: {n.expecting_reply}")
-            rlines.append(f"  Priority:      {n.priority} ({n.priority_name})")
-            if n.destination_network is not None:
-                dnet = n.destination_network
-                dnet_str = "Broadcast-All" if dnet == 0xFFFF else str(dnet)
-                rlines.append(f"  Dest Network:  {dnet_str}")
-                if n.destination_address:
-                    rlines.append(f"  Dest Address:  {n.destination_address}")
-            if n.source_network is not None:
-                rlines.append(f"  Src Network:   {n.source_network}")
-                if n.source_address:
-                    rlines.append(f"  Src Address:   {n.source_address}")
-            if n.hop_count is not None:
-                rlines.append(f"  Hop Count:     {n.hop_count}")
-            if n.is_network_message:
-                rlines.append(f"  Net Msg Type:  0x{n.network_message_type:02X}"
-                              f" ({n.network_message_name})")
-                if n.reject_reason is not None:
-                    rlines.append(f"  Reject Reason: {n.reject_reason}"
-                                  f" ({n.reject_reason_name})")
-                if n.vendor_id is not None:
-                    rlines.append(f"  Vendor ID:     {n.vendor_id}")
-        else:
-            rlines.append("  (not decoded)")
-
+        # Right side: raw hex + BVLC + NPDU
         hex_content = self.query_one("#hex-content", Label)
-        hex_content.update("\n".join(rlines))
-
-    @staticmethod
-    def _hex_dump(data: bytes, width: int = 16) -> list[str]:
-        """Format bytes as a hex dump (offset | hex bytes)."""
-        lines: list[str] = []
-        for offset in range(0, len(data), width):
-            chunk = data[offset:offset + width]
-            hex_part = " ".join(f"{b:02X}" for b in chunk)
-            lines.append(f"  {offset:04X}  {hex_part}")
-        return lines
+        hex_content.update(render_transport_detail(packet))
 
     def clear_detail(self) -> None:
         """Reset to placeholder text."""
@@ -521,13 +389,11 @@ class DeviceListPanel(Static):
 
         row_count = 0
         for ip, dev in known:
-            import datetime as _dt
-
-            first = _dt.datetime.fromtimestamp(
-                dev.first_seen, tz=_dt.timezone.utc
+            first = datetime.datetime.fromtimestamp(
+                dev.first_seen, tz=datetime.timezone.utc
             ).strftime("%H:%M:%S") if dev.first_seen else "—"
-            last = _dt.datetime.fromtimestamp(
-                dev.last_seen, tz=_dt.timezone.utc
+            last = datetime.datetime.fromtimestamp(
+                dev.last_seen, tz=datetime.timezone.utc
             ).strftime("%H:%M:%S") if dev.last_seen else "—"
 
             table.add_row(

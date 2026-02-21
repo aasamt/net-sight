@@ -20,8 +20,8 @@ import sys
 
 from backend.analysis.anomaly_detector import AnomalyDetector
 from backend.analysis.device_registry import DeviceRegistry
+from backend.analysis.packet_processor import PacketProcessor
 from backend.analysis.traffic_stats import TrafficStats
-from backend.parsers.pipeline import parse_packet
 from backend.settings import load_settings
 from backend.transport.bacnet_ip import BACnetIPCapture
 from backend.transport.base import RawPacket
@@ -274,15 +274,15 @@ async def run_capture(args: argparse.Namespace) -> None:
     """Run the packet capture → parse → analyze → display pipeline."""
     loop = asyncio.get_running_loop()
 
-    # --- Settings ---
+    # --- Settings & shared processor ---
     settings = load_settings(args.settings) if args.settings else load_settings()
     if settings.settings_path:
         logger.info("Loaded settings from %s", settings.settings_path)
 
-    # --- Analysis engines ---
-    device_registry = DeviceRegistry()
-    traffic_stats = TrafficStats()
-    anomaly_detector = AnomalyDetector(**settings.anomaly_kwargs())
+    processor = PacketProcessor(settings=settings)
+    device_registry = processor.device_registry
+    traffic_stats = processor.traffic_stats
+    anomaly_detector = processor.anomaly_detector
 
     # --- Packet queue (thread-safe bridge) ---
     queue: asyncio.Queue[RawPacket] = asyncio.Queue(maxsize=10_000)
@@ -342,26 +342,21 @@ async def run_capture(args: argparse.Namespace) -> None:
             except TimeoutError:
                 continue
 
-            # Parse
-            parsed = parse_packet(raw)
+            # Parse + analyze via shared processor
+            result = processor.process(raw)
             packet_count += 1
-
-            # Feed analysis engines
-            device_registry.process_packet(parsed)
-            traffic_stats.process_packet(parsed)
-            anomalies = anomaly_detector.process_packet(parsed)
 
             # Display per-packet output
             if not args.quiet:
-                print(parsed.summary)
+                print(result.parsed.summary)
 
             # Print anomaly alerts inline
-            for anomaly in anomalies:
+            for anomaly in result.anomalies:
                 print(f"  ⚠ [{anomaly.severity.upper()}] {anomaly.message}")
 
             # Save to JSONL
             if jsonl_file:
-                jsonl_file.write(parsed.model_dump_json() + "\n")
+                jsonl_file.write(result.parsed.model_dump_json() + "\n")
 
     # --- Periodic stats coroutine ---
     async def print_periodic_stats() -> None:

@@ -24,10 +24,8 @@ from textual.containers import Horizontal, Vertical
 from textual.widgets import Button, DataTable, Footer, Header, Label, TabbedContent, TabPane
 
 from backend.analysis.anomaly_detector import AnomalyDetector
-from backend.analysis.device_registry import DeviceRegistry
-from backend.analysis.traffic_stats import TrafficStats
+from backend.analysis.packet_processor import PacketProcessor
 from backend.models.packet import ParsedPacket
-from backend.parsers.pipeline import parse_packet
 from backend.settings import Settings, get_defaults, load_settings, reset_to_defaults, save_settings
 from backend.transport.base import RawPacket
 
@@ -85,10 +83,11 @@ class NetSightApp(App):
         # Settings (load from file if not provided)
         self._settings = settings if settings is not None else load_settings()
 
-        # Analysis engines
-        self._device_registry = DeviceRegistry()
-        self._traffic_stats = TrafficStats()
-        self._anomaly_detector = AnomalyDetector(**self._settings.anomaly_kwargs())
+        # Shared packet processor (owns analysis engines)
+        self._processor = PacketProcessor(settings=self._settings)
+        self._device_registry = self._processor.device_registry
+        self._traffic_stats = self._processor.traffic_stats
+        self._anomaly_detector = self._processor.anomaly_detector
 
         # Packet storage for save and detail lookup
         self._parsed_packets: list[ParsedPacket] = []
@@ -193,53 +192,27 @@ class NetSightApp(App):
                 # Still drain queue to prevent backpressure, but skip display
                 continue
 
-            # Parse
-            parsed = parse_packet(raw)
+            # Parse + analyze via shared processor
+            result = self._processor.process(raw)
             self._packet_count += 1
-            self._parsed_packets.append(parsed)
-            self._packets_by_id[parsed.id] = parsed
-
-            # Feed analysis engines
-            self._device_registry.process_packet(parsed)
-            self._traffic_stats.process_packet(parsed)
-            anomalies = self._anomaly_detector.process_packet(parsed)
+            self._parsed_packets.append(result.parsed)
+            self._packets_by_id[result.parsed.id] = result.parsed
 
             # Update packet table
-            service = ""
-            if parsed.apdu and parsed.apdu.service_name:
-                service = parsed.apdu.service_name
-            elif parsed.npdu and parsed.npdu.network_message_name:
-                service = parsed.npdu.network_message_name
-            elif parsed.bvlc:
-                service = parsed.bvlc.function_name
-
-            pdu_type = ""
-            if parsed.apdu:
-                pdu_type = parsed.apdu.pdu_type_name
-            elif parsed.npdu and parsed.npdu.is_network_message:
-                pdu_type = "Network"
-            elif parsed.bvlc:
-                pdu_type = parsed.bvlc.function_name
-
-            obj_str = ""
-            if parsed.apdu and parsed.apdu.object_identifier:
-                oid = parsed.apdu.object_identifier
-                obj_str = f"{oid.object_type_name}-{oid.instance}"
-
             packet_table = self.query_one("#packet-panel", PacketTable)
             packet_table.add_packet(
-                parsed.id,
-                parsed.effective_source_ip,
-                parsed.destination_ip,
-                pdu_type,
-                service,
-                obj_str,
-                parsed.length,
+                result.parsed.id,
+                result.parsed.effective_source_ip,
+                result.parsed.destination_ip,
+                result.pdu_type,
+                result.service,
+                result.obj_str,
+                result.parsed.length,
             )
 
             # Update anomaly log
             anomaly_log = self.query_one("#anomaly-panel", AnomalyLog)
-            for anomaly in anomalies:
+            for anomaly in result.anomalies:
                 anomaly_log.add_anomaly(anomaly.severity, anomaly.message)
 
             # Update status bar packet count
@@ -247,7 +220,7 @@ class NetSightApp(App):
 
             # Auto-save if path given
             if self._save_path:
-                self._save_packet_jsonl(parsed)
+                self._save_packet_jsonl(result.parsed)
 
     # ------------------------------------------------------------------
     # Packet selection → detail panel

@@ -35,6 +35,111 @@ from backend.models.apdu import (
 logger = logging.getLogger(__name__)
 
 
+# ---------------------------------------------------------------------------
+# BACnet Tag Reader — eliminates repeated tag-read-advance boilerplate
+# ---------------------------------------------------------------------------
+
+class BACnetTagReader:
+    """Cursor-based reader for BACnet ASN.1 tagged values.
+
+    Encapsulates the tag byte parsing, length extraction, and offset
+    advancement that was previously duplicated across all _try_extract_*
+    functions.
+    """
+
+    __slots__ = ("_data", "_offset")
+
+    def __init__(self, data: bytes, offset: int = 0) -> None:
+        self._data = data
+        self._offset = offset
+
+    @property
+    def has_data(self) -> bool:
+        """True if there are bytes remaining to read."""
+        return self._offset < len(self._data)
+
+    @property
+    def remaining(self) -> int:
+        """Number of bytes remaining."""
+        return len(self._data) - self._offset
+
+    def peek_tag(self) -> tuple[int, int, int] | None:
+        """Peek at the current tag without advancing.
+
+        Returns:
+            (tag_number, tag_class, length_vt) or None if no data.
+            tag_class: 0 = application, 1 = context.
+        """
+        if self._offset >= len(self._data):
+            return None
+        tag_byte = self._data[self._offset]
+        tag_number = (tag_byte >> 4) & 0x0F
+        tag_class = (tag_byte >> 3) & 0x01
+        length_vt = tag_byte & 0x07
+        return tag_number, tag_class, length_vt
+
+    def read_application_tag(self, expected_number: int) -> bytes | None:
+        """Read an application-tagged value if it matches the expected tag number.
+
+        Returns:
+            The value bytes, or None if tag doesn't match or insufficient data.
+            Advances offset past the tag + value on success.
+        """
+        info = self.peek_tag()
+        if info is None:
+            return None
+        tag_number, tag_class, length_vt = info
+        if tag_class != 0 or tag_number != expected_number:
+            return None
+        if self.remaining < 1 + length_vt:
+            return None
+        self._offset += 1
+        value = self._data[self._offset:self._offset + length_vt]
+        self._offset += length_vt
+        return value
+
+    def read_context_tag(self, expected_number: int) -> bytes | None:
+        """Read a context-tagged value if it matches the expected tag number.
+
+        Returns:
+            The value bytes, or None if tag doesn't match or insufficient data.
+            Advances offset past the tag + value on success.
+        """
+        info = self.peek_tag()
+        if info is None:
+            return None
+        tag_number, tag_class, length_vt = info
+        if tag_class != 1 or tag_number != expected_number:
+            return None
+        if self.remaining < 1 + length_vt:
+            return None
+        self._offset += 1
+        value = self._data[self._offset:self._offset + length_vt]
+        self._offset += length_vt
+        return value
+
+    def skip_current_tag(self) -> bool:
+        """Skip the current tag and its value, advancing the offset.
+
+        Returns:
+            True if a tag was skipped, False if no data.
+        """
+        info = self.peek_tag()
+        if info is None:
+            return False
+        _, _, length_vt = info
+        self._offset += 1 + length_vt
+        return True
+
+    def read_unsigned(self, value_bytes: bytes) -> int:
+        """Decode an unsigned integer from value bytes (big-endian)."""
+        return int.from_bytes(value_bytes, "big")
+
+    def read_object_id(self, value_bytes: bytes) -> int:
+        """Decode a 32-bit object identifier from value bytes."""
+        return struct.unpack("!I", value_bytes)[0]
+
+
 def decode_object_identifier(value: int) -> ObjectIdentifier:
     """Decode a 32-bit BACnet object identifier.
 
@@ -398,34 +503,22 @@ def _try_extract_object_id(msg: APDUMessage, service_data: bytes) -> None:
         return
 
     try:
+        reader = BACnetTagReader(service_data)
+
         # I-Am response: first tag is application tag 12 (object identifier)
         if msg.pdu_type == 1 and msg.service_choice == 0:
-            # I-Am: tag byte + length + 4 bytes object ID
-            tag_byte = service_data[0]
-            tag_number = (tag_byte >> 4) & 0x0F
-            tag_class = (tag_byte >> 3) & 0x01  # 0 = application, 1 = context
-
-            if tag_class == 0 and tag_number == 12:
-                # Application tag 12 = BACnetObjectIdentifier, 4 bytes
-                length_vt = tag_byte & 0x07
-                if length_vt == 4 and len(service_data) >= 5:
-                    obj_value = struct.unpack("!I", service_data[1:5])[0]
-                    msg.object_identifier = decode_object_identifier(obj_value)
+            value = reader.read_application_tag(12)
+            if value and len(value) == 4:
+                obj_value = reader.read_object_id(value)
+                msg.object_identifier = decode_object_identifier(obj_value)
             return
 
         # Confirmed services with context tag [0] = objectIdentifier
-        # ReadProperty, WriteProperty, etc.
         if msg.pdu_type in (0, 3) and service_data:
-            tag_byte = service_data[0]
-            tag_number = tag_byte >> 4
-            tag_class = (tag_byte >> 3) & 0x01  # 1 = context tag
-
-            if tag_class == 1 and tag_number == 0:
-                # Context tag [0], typically 4 bytes for object ID
-                length_vt = tag_byte & 0x07
-                if length_vt == 4 and len(service_data) >= 5:
-                    obj_value = struct.unpack("!I", service_data[1:5])[0]
-                    msg.object_identifier = decode_object_identifier(obj_value)
+            value = reader.read_context_tag(0)
+            if value and len(value) == 4:
+                obj_value = reader.read_object_id(value)
+                msg.object_identifier = decode_object_identifier(obj_value)
 
     except Exception:
         # Best-effort extraction — don't fail the parse
@@ -443,39 +536,23 @@ def _try_extract_error(msg: APDUMessage, error_data: bytes) -> None:
         return
 
     try:
-        offset = 0
+        reader = BACnetTagReader(error_data)
 
-        # Error class: application tag 9, usually 1 byte value
-        tag_byte = error_data[offset]
-        tag_number = (tag_byte >> 4) & 0x0F
-        if tag_number == 9:  # Enumerated
-            length_vt = tag_byte & 0x07
-            offset += 1
-            if length_vt > 0 and len(error_data) >= offset + length_vt:
-                error_class = int.from_bytes(
-                    error_data[offset : offset + length_vt], "big"
-                )
-                msg.error_class = error_class
-                msg.error_class_name = ERROR_CLASSES.get(
-                    error_class, f"Unknown-{error_class}"
-                )
-                offset += length_vt
+        # Error class: application tag 9 (enumerated)
+        value = reader.read_application_tag(9)
+        if value:
+            error_class = reader.read_unsigned(value)
+            msg.error_class = error_class
+            msg.error_class_name = ERROR_CLASSES.get(
+                error_class, f"Unknown-{error_class}"
+            )
 
-        # Error code: application tag 9, usually 1 byte value
-        if len(error_data) > offset:
-            tag_byte = error_data[offset]
-            tag_number = (tag_byte >> 4) & 0x0F
-            if tag_number == 9:
-                length_vt = tag_byte & 0x07
-                offset += 1
-                if length_vt > 0 and len(error_data) >= offset + length_vt:
-                    error_code = int.from_bytes(
-                        error_data[offset : offset + length_vt], "big"
-                    )
-                    msg.error_code = error_code
+        # Error code: application tag 9 (enumerated)
+        value = reader.read_application_tag(9)
+        if value:
+            msg.error_code = reader.read_unsigned(value)
 
     except Exception:
-        # Best-effort extraction
         pass
 
 
@@ -498,50 +575,26 @@ def _try_extract_property_id(msg: APDUMessage, service_data: bytes) -> None:
         return
 
     try:
-        offset = 0
+        reader = BACnetTagReader(service_data)
 
         # Skip context tag [0] — object identifier (already parsed)
-        tag_byte = service_data[offset]
-        tag_number = tag_byte >> 4
-        tag_class = (tag_byte >> 3) & 0x01
-        if tag_class == 1 and tag_number == 0:
-            length_vt = tag_byte & 0x07
-            offset += 1 + length_vt
-        else:
-            return
-
-        if offset >= len(service_data):
+        value = reader.read_context_tag(0)
+        if value is None:
             return
 
         # Context tag [1] — property identifier (enumerated, 1-4 bytes)
-        tag_byte = service_data[offset]
-        tag_number = tag_byte >> 4
-        tag_class = (tag_byte >> 3) & 0x01
-        if tag_class == 1 and tag_number == 1:
-            length_vt = tag_byte & 0x07
-            offset += 1
-            if length_vt > 0 and len(service_data) >= offset + length_vt:
-                prop_id = int.from_bytes(
-                    service_data[offset:offset + length_vt], "big"
-                )
-                msg.property_identifier = prop_id
-                msg.property_name = PROPERTY_IDENTIFIERS.get(
-                    prop_id, f"Proprietary-{prop_id}"
-                )
-                offset += length_vt
+        value = reader.read_context_tag(1)
+        if value:
+            prop_id = reader.read_unsigned(value)
+            msg.property_identifier = prop_id
+            msg.property_name = PROPERTY_IDENTIFIERS.get(
+                prop_id, f"Proprietary-{prop_id}"
+            )
 
         # Optional context tag [2] — property array index
-        if offset < len(service_data):
-            tag_byte = service_data[offset]
-            tag_number = tag_byte >> 4
-            tag_class = (tag_byte >> 3) & 0x01
-            if tag_class == 1 and tag_number == 2:
-                length_vt = tag_byte & 0x07
-                offset += 1
-                if length_vt > 0 and len(service_data) >= offset + length_vt:
-                    msg.property_array_index = int.from_bytes(
-                        service_data[offset:offset + length_vt], "big"
-                    )
+        value = reader.read_context_tag(2)
+        if value:
+            msg.property_array_index = reader.read_unsigned(value)
 
     except Exception:
         pass
@@ -560,71 +613,33 @@ def _try_extract_iam_fields(msg: APDUMessage, service_data: bytes) -> None:
         return
 
     try:
-        offset = 0
+        reader = BACnetTagReader(service_data)
 
-        # 1) Object identifier (tag 12, 4 bytes) — already parsed by _try_extract_object_id
-        tag_byte = service_data[offset]
-        tag_number = (tag_byte >> 4) & 0x0F
-        if tag_number != 12:
-            return
-        length_vt = tag_byte & 0x07
-        offset += 1 + length_vt  # skip tag + value
-
-        # Extract device instance from the already-parsed object identifier
-        device_instance = 0
-        if msg.object_identifier:
-            device_instance = msg.object_identifier.instance
-
-        if offset >= len(service_data):
+        # 1) Object identifier (tag 12) — already parsed by _try_extract_object_id
+        value = reader.read_application_tag(12)
+        if value is None:
             return
 
-        # 2) Max APDU length accepted (tag 2 = unsigned, variable length)
-        tag_byte = service_data[offset]
-        tag_number = (tag_byte >> 4) & 0x0F
-        if tag_number != 2:
-            return
-        length_vt = tag_byte & 0x07
-        offset += 1
-        if len(service_data) < offset + length_vt:
-            return
-        max_apdu = int.from_bytes(
-            service_data[offset:offset + length_vt], "big"
-        )
-        offset += length_vt
+        device_instance = msg.object_identifier.instance if msg.object_identifier else 0
 
-        if offset >= len(service_data):
+        # 2) Max APDU length accepted (tag 2 = unsigned)
+        value = reader.read_application_tag(2)
+        if value is None:
             return
+        max_apdu = reader.read_unsigned(value)
 
-        # 3) Segmentation supported (tag 9 = enumerated, 1 byte)
-        tag_byte = service_data[offset]
-        tag_number = (tag_byte >> 4) & 0x0F
-        if tag_number != 9:
+        # 3) Segmentation supported (tag 9 = enumerated)
+        value = reader.read_application_tag(9)
+        if value is None:
             return
-        length_vt = tag_byte & 0x07
-        offset += 1
-        if len(service_data) < offset + length_vt:
-            return
-        seg_value = int.from_bytes(
-            service_data[offset:offset + length_vt], "big"
-        )
+        seg_value = reader.read_unsigned(value)
         seg_name = SEGMENTATION_VALUES.get(seg_value, f"Unknown-{seg_value}")
-        offset += length_vt
 
-        if offset >= len(service_data):
+        # 4) Vendor ID (tag 2 = unsigned)
+        value = reader.read_application_tag(2)
+        if value is None:
             return
-
-        # 4) Vendor ID (tag 2 = unsigned, variable length)
-        tag_byte = service_data[offset]
-        tag_number = (tag_byte >> 4) & 0x0F
-        if tag_number != 2:
-            return
-        length_vt = tag_byte & 0x07
-        offset += 1
-        if len(service_data) < offset + length_vt:
-            return
-        vendor_id = int.from_bytes(
-            service_data[offset:offset + length_vt], "big"
-        )
+        vendor_id = reader.read_unsigned(value)
 
         msg.iam_fields = IAmFields(
             device_instance=device_instance,
@@ -651,39 +666,19 @@ def _try_extract_whois_range(msg: APDUMessage, service_data: bytes) -> None:
         return
 
     try:
-        offset = 0
+        reader = BACnetTagReader(service_data)
 
         # Context tag [0] — low limit
-        tag_byte = service_data[offset]
-        tag_number = tag_byte >> 4
-        tag_class = (tag_byte >> 3) & 0x01
-        if tag_class != 1 or tag_number != 0:
+        value = reader.read_context_tag(0)
+        if value is None:
             return
-        length_vt = tag_byte & 0x07
-        offset += 1
-        if len(service_data) < offset + length_vt:
-            return
-        low_limit = int.from_bytes(
-            service_data[offset:offset + length_vt], "big"
-        )
-        offset += length_vt
-
-        if offset >= len(service_data):
-            return
+        low_limit = reader.read_unsigned(value)
 
         # Context tag [1] — high limit
-        tag_byte = service_data[offset]
-        tag_number = tag_byte >> 4
-        tag_class = (tag_byte >> 3) & 0x01
-        if tag_class != 1 or tag_number != 1:
+        value = reader.read_context_tag(1)
+        if value is None:
             return
-        length_vt = tag_byte & 0x07
-        offset += 1
-        if len(service_data) < offset + length_vt:
-            return
-        high_limit = int.from_bytes(
-            service_data[offset:offset + length_vt], "big"
-        )
+        high_limit = reader.read_unsigned(value)
 
         msg.who_is_range = WhoIsRange(
             low_limit=low_limit,
