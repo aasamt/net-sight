@@ -28,9 +28,11 @@ from backend.analysis.packet_processor import PacketProcessor
 from backend.models.packet import ParsedPacket
 from backend.settings import Settings, get_defaults, load_settings, reset_to_defaults, save_settings
 from backend.transport.base import RawPacket
+from backend.transport.whois_sender import send_whois
 
 from .widgets import (
     AnomalyLog,
+    CommandsPanel,
     DeviceListPanel,
     DevicePanel,
     PacketDetailPanel,
@@ -124,6 +126,9 @@ class NetSightApp(App):
                     yield AnomalyLog(id="anomaly-panel")
             with TabPane("Devices", id="tab-devices"):
                 yield DeviceListPanel(id="device-list-panel")
+            if self._is_live:
+                with TabPane("Commands", id="tab-commands"):
+                    yield CommandsPanel(id="commands-panel-tab")
             with TabPane("Settings", id="tab-settings"):
                 yield SettingsPanel(id="settings-panel-tab")
         yield Footer()
@@ -378,11 +383,13 @@ class NetSightApp(App):
     # ------------------------------------------------------------------
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
-        """Handle Save and Reset button presses in the Settings tab."""
+        """Handle button presses in Settings and Commands tabs."""
         if event.button.id == "btn-save-settings":
             self._apply_and_save_settings()
         elif event.button.id == "btn-reset-settings":
             self._reset_settings_to_defaults()
+        elif event.button.id == "btn-send-whois":
+            self._send_whois()
 
     def _apply_and_save_settings(self) -> None:
         """Read values from the settings panel, apply to detector, and save to file."""
@@ -434,3 +441,43 @@ class NetSightApp(App):
 
         panel.set_status(f"Reset to defaults — saved to {self._settings.settings_path}")
         self.notify("Settings reset to defaults", severity="information")
+
+    def _send_whois(self) -> None:
+        """Send a Who-Is broadcast from the Commands tab."""
+        panel = self.query_one("#commands-panel-tab", CommandsPanel)
+
+        try:
+            low, high = panel.get_whois_range()
+        except ValueError as e:
+            panel.set_status(f"Invalid range: {e}", is_error=True)
+            return
+
+        # Determine interface IP from current transport (if live capture)
+        interface_ip: str | None = None
+        if self._is_live and hasattr(self._transport, "interface"):
+            iface = self._transport.interface
+            if iface:
+                # Try to resolve the interface name to an IP
+                try:
+                    from scapy.all import conf as scapy_conf
+
+                    iface_obj = scapy_conf.ifaces.get(iface)
+                    if iface_obj:
+                        interface_ip = getattr(iface_obj, "ip", None)
+                except Exception:
+                    pass
+
+        result = send_whois(
+            interface_ip=interface_ip,
+            low_limit=low,
+            high_limit=high,
+        )
+
+        is_error = result.startswith("Error")
+        panel.set_status(result, is_error=is_error)
+        panel.append_log(result)
+
+        if not is_error:
+            self.notify("Who-Is broadcast sent", severity="information")
+        else:
+            self.notify(result, severity="error")

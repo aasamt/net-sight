@@ -183,6 +183,77 @@ TabPane {
     layout: vertical;
 }
 
+#tab-commands {
+    layout: vertical;
+}
+
+/* ---------- Commands Panel (commands tab) ---------- */
+#commands-panel-tab {
+    height: 100%;
+    border: solid $accent;
+}
+
+#commands-panel-tab .panel-title {
+    dock: top;
+    height: 1;
+    background: $accent;
+    color: $text;
+    text-style: bold;
+    padding: 0 1;
+}
+
+#commands-hint {
+    dock: top;
+    height: 1;
+    background: $surface;
+    color: $text-muted;
+    padding: 0 1;
+}
+
+#whois-desc {
+    height: auto;
+    padding: 0 2;
+    color: $text-muted;
+    margin-bottom: 1;
+}
+
+#commands-scroll {
+    height: auto;
+    max-height: 16;
+    scrollbar-size: 1 1;
+    padding: 0 1;
+}
+
+#commands-buttons {
+    dock: bottom;
+    height: 3;
+    padding: 0 2;
+    align: left middle;
+}
+
+#commands-buttons Button {
+    margin-right: 2;
+}
+
+#commands-status {
+    dock: bottom;
+    height: 1;
+    padding: 0 1;
+    color: $success;
+}
+
+#commands-log-scroll {
+    height: 1fr;
+    border-top: solid $surface;
+    scrollbar-size: 1 1;
+    padding: 0 1;
+}
+
+#commands-log {
+    width: 100%;
+    color: $text-muted;
+}
+
 /* ---------- Settings Panel (settings tab) ---------- */
 #settings-panel-tab {
     height: 100%;

@@ -1,7 +1,7 @@
 # NetSight — Session Progress & Handoff
 
-> **Last Updated:** February 19, 2026
-> **Status:** Phase 5h Complete — TUI Settings Tab (194 tests passing)
+> **Last Updated:** February 20, 2026
+> **Status:** Phase 5i Complete — Commands Tab with Who-Is Broadcast (197 tests passing)
 
 ---
 
@@ -351,6 +351,38 @@ After reading these files, tell me what has been completed and what the next imp
 
 ---
 
+### Phase 5i: TUI Commands Tab — Who-Is Broadcast
+- [x] Create `backend/transport/whois_sender.py` — Who-Is packet builder and sender
+  - `build_whois_packet(low_limit, high_limit)` constructs valid BACnet/IP Who-Is packets
+  - BVLC Original-Broadcast-NPDU (0x0B) + NPDU global broadcast (DNET=0xFFFF) + APDU Unconfirmed Who-Is (service 8)
+  - Optional device instance range via BACnet context-tagged unsigned integers (tags 0 and 1)
+  - `_encode_context_unsigned()` uses minimum bytes needed (1–4 bytes) per BACnet encoding rules
+  - `send_whois(interface_ip, low_limit, high_limit)` sends via raw UDP socket with SO_BROADCAST
+  - Input validation: range 0–4194303, low <= high, both or neither specified
+  - Error handling: PermissionError, OSError with human-readable messages
+- [x] Add `CommandsPanel` widget to `backend/tui/widgets.py`
+  - Low Device ID and High Device ID input fields with defaults (0 and 4194303)
+  - "Send Who-Is" button triggers broadcast
+  - Status line for success/error feedback
+  - Scrolling command log tracking all sent commands
+  - `get_whois_range()` reads and validates range inputs
+  - `append_log()` with internal list-based state tracking
+- [x] Wire Commands tab into `backend/tui/app.py`
+  - New "Commands" TabPane between Devices and Settings tabs
+  - `_send_whois()` handler: validates range, resolves interface IP from transport, calls `send_whois()`
+  - Results displayed in CommandsPanel status + log + toast notification
+  - Commands tab conditionally rendered — only available during live capture (`self._is_live`)
+  - Pcap replay mode omits the Commands tab entirely
+- [x] Add Commands tab styles to `backend/tui/styles.tcss`
+  - `#tab-commands` layout, `#commands-panel-tab` border/title, hint bar
+  - `#commands-scroll`, `#commands-buttons`, `#commands-status`, `#commands-log-scroll`
+  - Reuses existing `.settings-row`, `.settings-label`, `.settings-input`, `.settings-desc` classes
+- [x] All 197 existing tests pass — no regressions
+
+**Requirement coverage:** FR-CMD-01 through FR-CMD-05
+
+---
+
 ### Phase 6: FastAPI Server & WebSocket Streaming
 - [ ] Extend `backend/main.py` `--serve` mode — FastAPI app with uvicorn on `127.0.0.1:8765`
   - CORS middleware for future Electron renderer
@@ -498,6 +530,8 @@ After reading these files, tell me what has been completed and what the next imp
 | 12 | 2026-02-12 | Manual byte-level parsers as primary (not BACpypes3 decode_packet) | BACpypes3 primary + manual fallback | Full control over all 12 BVLC functions, 20 network message types, 8 PDU types; BACpypes3 can be added later for deeper ASN.1 service data enrichment |
 | 13 | 2026-02-12 | Textual TUI as default CLI output (not scrolling terminal) | Rich Live+Layout, curses, urwid, blessed | Asyncio-native, CSS layout, DataTable widget, keyboard nav, built-in testing (Pilot); `--plain` preserves old behavior for scripting/CI |
 | 14 | 2026-02-17 | TabbedContent for multi-view TUI (not single-page scroll) | Multiple apps, screen switching, manual tab bar | Textual built-in TabbedContent/TabPane — zero custom plumbing, keyboard-navigable, auto-styled; separate concerns (traffic monitoring vs device inventory) into distinct views |
+| 15 | 2026-02-20 | Who-Is sender uses raw UDP socket (not Scapy send) | Scapy send(), BACpypes3 WHO-IS service | Simpler, no additional root requirement for broadcast send; full control over BVLC/NPDU/APDU byte construction; consistent with project's manual byte-level parser approach |
+| 16 | 2026-02-20 | Commands tab live-capture-only (hidden for pcap replay) | Always visible with disabled button, separate CLI flag | Sending packets during pcap replay is nonsensical; conditional `compose()` is cleaner than disabling UI elements |
 
 ---
 
@@ -537,6 +571,7 @@ After reading these files, tell me what has been completed and what the next imp
 | 2026-02-19 | Phase 5g complete — User-adjustable settings.toml; settings loader with validation/fallback; --settings CLI flag; per-sub-type cooldowns; pcap burst intensity increased; 183 tests passing |
 | 2026-02-19 | Phase 5h complete — TUI Settings tab: SettingsPanel widget, save/reset buttons, live detector updates, save_settings() TOML writer, get_defaults(); 194 tests passing |
 | 2026-02-19 | Settings restructured to two-file architecture: settings_user.toml (active) + settings_default.toml (immutable defaults); reset_to_defaults() copies defaults to user file; 197 tests passing |
+| 2026-02-20 | Phase 5i complete — Commands tab with Who-Is broadcast sender; whois_sender.py (packet builder + UDP sender); CommandsPanel widget with range inputs, send button, command log; live-capture-only tab; 197 tests passing |
 
 ---
 
@@ -546,6 +581,7 @@ After reading these files, tell me what has been completed and what the next imp
 1. Extend `backend/main.py` `--serve` mode — FastAPI app with uvicorn on `127.0.0.1:8765`
 2. Create REST endpoints for capture control, analysis data, and export
 3. Create WebSocket endpoints for real-time packet/stats/anomaly streaming
-4. Test with curl and wscat
+4. Add Who-Is command REST endpoint (`POST /api/commands/whois`) reusing `whois_sender.py`
+5. Test with curl and wscat
 
 **Goal:** By end of Phase 6, run `uv run python backend/main.py --serve` and consume live BACnet data via REST/WebSocket from any HTTP client.

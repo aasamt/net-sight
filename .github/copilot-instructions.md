@@ -40,12 +40,13 @@ backend/                     # Python 3.12+, FastAPI
   transport/base.py          # TransportCapture abstract base class
   transport/bacnet_ip.py     # BACnetIPCapture — Scapy AsyncSniffer
   transport/pcap_replay.py   # PcapReplayCapture — pcap file import
+  transport/whois_sender.py  # Who-Is broadcast packet builder & UDP sender
   parsers/{bvlc,npdu,apdu}.py  # Per-layer parsers (separated by protocol layer)
   parsers/pipeline.py        # Full decode orchestration
   analysis/                  # device_registry, traffic_stats, anomaly_detector, packet_inspector
-  tui/                       # Textual TUI dashboard (tabbed: Traffic, Devices, Settings)
+  tui/                       # Textual TUI dashboard (tabbed: Traffic, Devices, Commands, Settings)
     app.py                   # NetSightApp(App) — main TUI application
-    widgets.py               # PacketTable, StatsPanel, DevicePanel, DeviceListPanel, AnomalyLog, SettingsPanel
+    widgets.py               # PacketTable, StatsPanel, DevicePanel, DeviceListPanel, AnomalyLog, CommandsPanel, SettingsPanel
     styles.tcss              # Textual CSS for panel layout and colors
   api/                       # capture, analysis, export REST + ws WebSocket endpoints (--serve mode)
   tests/                     # Parser, analysis, settings, TUI, and CLI unit tests
@@ -86,7 +87,7 @@ Managed via `uv` with `pyproject.toml`. Use `uv sync` to install, `uv run` to ex
 | `scapy` | Packet capture (AsyncSniffer), NO built-in BACnet layer |
 | `bacpypes3` | BACnet protocol decode (BVLC, NPDU, APDU) |
 | `pydantic` | Data models and validation |
-| `textual` | TUI dashboard — tabbed interface (Traffic, Devices, Settings tabs), DataTable, TabbedContent, Input forms, keyboard nav |
+| `textual` | TUI dashboard — tabbed interface (Traffic, Devices, Commands, Settings tabs), DataTable, TabbedContent, Input forms, keyboard nav |
 
 ## Platform-Specific Concerns
 

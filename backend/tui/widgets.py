@@ -592,3 +592,96 @@ class SettingsPanel(Static):
         if val == int(val):
             return str(int(val))
         return str(val)
+
+
+# ---------------------------------------------------------------------------
+# Commands Panel (commands tab)
+# ---------------------------------------------------------------------------
+
+class CommandsPanel(Static):
+    """Commands panel — send BACnet service requests.
+
+    Currently supports Who-Is broadcast with optional device instance range.
+    """
+
+    DEFAULT_CSS = """
+    CommandsPanel {
+        height: 100%;
+    }
+    """
+
+    def __init__(self, **kwargs: object) -> None:
+        super().__init__(**kwargs)
+        self._log_entries: list[str] = []
+
+    def compose(self) -> ComposeResult:
+        yield Label(" Commands — BACnet Service Requests", classes="panel-title")
+        yield Static(
+            "  Send BACnet commands to the network. Responses appear in the Traffic tab.",
+            id="commands-hint",
+        )
+        with VerticalScroll(id="commands-scroll"):
+            yield Label("  ── Who-Is Broadcast ──", classes="settings-group-header")
+            yield Static(
+                "  Sends a Who-Is broadcast to discover BACnet devices on the network.\n"
+                "  Leave range fields empty for a global Who-Is (all devices respond).\n"
+                "  Specify both Low and High to limit discovery to a device ID range.",
+                id="whois-desc",
+            )
+            with Horizontal(classes="settings-row"):
+                yield Label("  Low Device ID", classes="settings-label")
+                yield Input(
+                    value="0",
+                    placeholder="0",
+                    id="whois-low",
+                    classes="settings-input",
+                )
+                yield Label("Min device instance (0–4194303)", classes="settings-desc")
+            with Horizontal(classes="settings-row"):
+                yield Label("  High Device ID", classes="settings-label")
+                yield Input(
+                    value="4194303",
+                    placeholder="4194303",
+                    id="whois-high",
+                    classes="settings-input",
+                )
+                yield Label("Max device instance (0–4194303)", classes="settings-desc")
+        with Horizontal(id="commands-buttons"):
+            yield Button("Send Who-Is", variant="primary", id="btn-send-whois")
+        yield Static("", id="commands-status")
+        with VerticalScroll(id="commands-log-scroll"):
+            yield Static("  Command log will appear here.", id="commands-log")
+
+    def set_status(self, message: str, is_error: bool = False) -> None:
+        """Update the status line below the buttons."""
+        status = self.query_one("#commands-status", Static)
+        prefix = "  ✗ " if is_error else "  ✓ "
+        status.update(prefix + message)
+
+    def get_whois_range(self) -> tuple[int | None, int | None]:
+        """Read the Who-Is range fields.
+
+        Returns:
+            (low_limit, high_limit) — both None if fields are empty.
+
+        Raises:
+            ValueError: If values are invalid.
+        """
+        low_text = self.query_one("#whois-low", Input).value.strip()
+        high_text = self.query_one("#whois-high", Input).value.strip()
+
+        low: int | None = None
+        high: int | None = None
+
+        if low_text:
+            low = int(low_text)
+        if high_text:
+            high = int(high_text)
+
+        return low, high
+
+    def append_log(self, message: str) -> None:
+        """Add an entry to the command log."""
+        log = self.query_one("#commands-log", Static)
+        self._log_entries.append(message)
+        log.update("\n".join(f"  {entry}" for entry in self._log_entries))

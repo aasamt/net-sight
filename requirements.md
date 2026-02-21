@@ -110,7 +110,17 @@ NetSight is a cross-platform desktop application that passively captures BACnet/
 | FR-ANO-08 | Display anomalies with severity level, device, description, timestamp | P0 |
 | FR-ANO-09 | Detect duplicate BACnet device IDs (same instance number from multiple IPs) | P0 |
 
-### 4.6 Packet Inspection
+### 4.6 BACnet Commands
+
+| ID | Requirement | Priority |
+|----|-------------|----------|
+| FR-CMD-01 | Send Who-Is broadcast to discover BACnet devices on the network | P1 |
+| FR-CMD-02 | Support optional device instance range (low limit, high limit) for Who-Is requests | P1 |
+| FR-CMD-03 | Display command results and status in the TUI | P1 |
+| FR-CMD-04 | Commands tab only available during live capture (not pcap replay) | P1 |
+| FR-CMD-05 | Construct valid BACnet/IP packets (BVLC Original-Broadcast + NPDU global broadcast + APDU Who-Is) | P1 |
+
+### 4.7 Packet Inspection
 
 | ID | Requirement | Priority |
 |----|-------------|----------|
@@ -121,7 +131,7 @@ NetSight is a cross-platform desktop application that passively captures BACnet/
 | FR-INS-05 | Configurable detail level: summary, normal, full decode | P1 |
 | FR-INS-06 | Auto-scroll during live capture with ability to pause scrolling | P0 |
 
-### 4.7 Export
+### 4.8 Export
 
 | ID | Requirement | Priority |
 |----|-------------|----------|
@@ -132,7 +142,7 @@ NetSight is a cross-platform desktop application that passively captures BACnet/
 | FR-EXP-05 | Export traffic statistics as JSON | P1 |
 | FR-EXP-06 | Export full analysis report as JSON | P1 |
 
-### 4.8 Session Management
+### 4.9 Session Management
 
 | ID | Requirement | Priority |
 |----|-------------|----------|
@@ -468,3 +478,4 @@ The architecture must support adding RS-485 serial capture without restructuring
 | App name | NetSight | User-selected |
 | Configuration format | TOML (`settings_user.toml` + `settings_default.toml`) | Human-readable, Python stdlib `tomllib` in 3.11+, comments supported |
 | Settings persistence | Two-file architecture — `settings_user.toml` (active) + `settings_default.toml` (immutable defaults) | Editable by hand or via TUI; reset copies defaults to user file; survives restarts |
+| BACnet Commands | Who-Is broadcast via raw UDP socket (not Scapy send) | Simpler, no root required for broadcast send on most systems; proper BVLC/NPDU/APDU byte-level construction |
