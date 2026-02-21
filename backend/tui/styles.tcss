@@ -33,12 +33,33 @@ Screen {
 }
 
 #packet-filter {
-    dock: top;
     height: 1;
     margin: 0;
     padding: 0 1;
     border: none;
     background: $surface;
+}
+
+#filter-row {
+    dock: top;
+    height: 1;
+    layout: horizontal;
+}
+
+#filter-row #packet-filter {
+    width: 1fr;
+}
+
+.filter-help-btn {
+    width: 5;
+    min-width: 5;
+    height: 1;
+    margin: 0;
+    padding: 0 1;
+    border: none;
+    background: $accent;
+    color: $text;
+    text-style: bold;
 }
 
 /* Right side stack */

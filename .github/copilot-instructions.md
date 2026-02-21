@@ -46,7 +46,7 @@ backend/                     # Python 3.12+, FastAPI
   analysis/                  # device_registry, traffic_stats, anomaly_detector, packet_inspector
   tui/                       # Textual TUI dashboard (tabbed: Traffic, Devices, Commands, Settings)
     app.py                   # NetSightApp(App) — main TUI application
-    widgets.py               # PacketTable, StatsPanel, DevicePanel, DeviceListPanel, AnomalyLog, CommandsPanel, SettingsPanel
+    widgets.py               # PacketTable, StatsPanel, DevicePanel, DeviceListPanel, AnomalyLog, CommandsPanel, SettingsPanel, FilterExpression, FilterHelpScreen
     styles.tcss              # Textual CSS for panel layout and colors
   api/                       # capture, analysis, export REST + ws WebSocket endpoints (--serve mode)
   tests/                     # Parser, analysis, settings, TUI, and CLI unit tests
@@ -67,6 +67,7 @@ electron/                    # main.ts (spawn Python), preload.ts (IPC bridge) (
 - **Settings:** Two-file architecture at project root — `settings_user.toml` (active, editable) and `settings_default.toml` (immutable reference). `backend/settings.py` loads from `settings_user.toml`, saves to `settings_user.toml`, and `reset_to_defaults()` copies `settings_default.toml` into `settings_user.toml`. The TUI Settings tab provides live editing with Save and Reset to Defaults. Settings persist across sessions.
 - **Scapy config:** Always use `store=False`, BPF filter `udp port 47808`, immediate mode. Minimize work in `prn` callback — queue raw data only.
 - **Queue backpressure:** Drop oldest on overflow (`put_nowait` with `QueueFull` exception swallowed), never block the capture thread.
+- **Packet filtering:** `FilterExpression` parser in `widgets.py` — Wireshark-style syntax with `field == value`, `!=`, `contains`, `&&`, `||`, `key:value` shorthand, and plain text fallback. `FilterHelpScreen` (ModalScreen) provides in-app filter reference via `?` button.
 - **Backend security:** FastAPI binds to `127.0.0.1` only. No external access.
 
 ## BACnet Protocol Quick Reference

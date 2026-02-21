@@ -128,6 +128,12 @@ NetSight is a cross-platform desktop application that passively captures BACnet/
 | FR-INS-02 | Click packet to view full decoded detail (all layers: BVLC, NPDU, APDU) | P0 |
 | FR-INS-03 | Display raw hex dump of packet bytes | P1 |
 | FR-INS-04 | Filter packet list by service type, source/destination, device instance | P1 |
+| FR-FIL-01 | Wireshark-style filter syntax with field-specific matching (src, dst, pdu, service, object, size) | P1 |
+| FR-FIL-02 | Support operators: == (exact match), != (not equal), contains (substring) — case-insensitive | P1 |
+| FR-FIL-03 | Support logical connectives: && (AND), \|\| (OR) with correct precedence (AND binds tighter) | P1 |
+| FR-FIL-04 | Support key:value shorthand syntax as alias for field contains value | P1 |
+| FR-FIL-05 | Plain text fallback: unrecognized input searches across all visible columns | P1 |
+| FR-FIL-06 | Filter help popup accessible via ? button next to filter input | P1 |
 | FR-INS-05 | Configurable detail level: summary, normal, full decode | P1 |
 | FR-INS-06 | Auto-scroll during live capture with ability to pause scrolling | P0 |
 

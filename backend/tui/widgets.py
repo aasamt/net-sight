@@ -13,17 +13,320 @@ Widgets:
 from __future__ import annotations
 
 import datetime
+import re
 from collections import deque
 from typing import TYPE_CHECKING
 
 from textual.app import ComposeResult
 from textual.containers import Horizontal, VerticalScroll
+from textual.screen import ModalScreen
 from textual.widgets import Button, DataTable, Input, Label, Static
 
 from backend.analysis.packet_inspector import render_apdu_detail, render_transport_detail
 
 if TYPE_CHECKING:
     from backend.models.packet import ParsedPacket
+
+# ---------------------------------------------------------------------------
+# Packet Filter Expression Parser
+# ---------------------------------------------------------------------------
+
+# Map user-facing field names/aliases → row tuple index
+# Row: (#=0, Source=1, Destination=2, PDU Type=3, Service=4, Object=5, Size=6)
+FILTER_FIELD_ALIASES: dict[str, int] = {
+    # Source IP
+    "src": 1, "source": 1, "ip.src": 1,
+    # Destination IP
+    "dst": 2, "dest": 2, "destination": 2, "ip.dst": 2,
+    # PDU type
+    "pdu": 3, "pdu_type": 3, "type": 3,
+    # Service name
+    "service": 4, "svc": 4,
+    # Object
+    "object": 5, "obj": 5,
+    # Packet size
+    "size": 6, "length": 6, "len": 6,
+}
+
+# Regex to tokenize operator-based clauses: field op value
+_CLAUSE_RE = re.compile(
+    r"^\s*(\w[\w.]*)\s*(==|!=|contains)\s*(.+?)\s*$",
+    re.IGNORECASE,
+)
+
+# Regex for key:value shorthand
+_KV_RE = re.compile(
+    r"^\s*(\w[\w.]*):(\S+)\s*$",
+    re.IGNORECASE,
+)
+
+
+class _FilterClause:
+    """A single filter condition: field op value."""
+
+    __slots__ = ("field_index", "op", "value")
+
+    def __init__(self, field_index: int, op: str, value: str) -> None:
+        self.field_index = field_index
+        self.op = op  # "==", "!=", "contains"
+        self.value = value.lower()
+
+    def matches(self, row: tuple[str, ...]) -> bool:
+        """Evaluate this clause against a row tuple."""
+        cell = row[self.field_index].lower()
+        if self.op == "==":
+            return cell == self.value
+        if self.op == "!=":
+            return cell != self.value
+        # "contains"
+        return self.value in cell
+
+
+class _SubstringFilter:
+    """Fallback: plain substring match across all columns."""
+
+    __slots__ = ("text",)
+
+    def __init__(self, text: str) -> None:
+        self.text = text.lower()
+
+    def matches(self, row: tuple[str, ...]) -> bool:
+        combined = " ".join(row).lower()
+        return self.text in combined
+
+
+class _AndGroup:
+    """A group of clauses joined by AND — all must match."""
+
+    __slots__ = ("clauses",)
+
+    def __init__(self, clauses: list[_FilterClause | _SubstringFilter]) -> None:
+        self.clauses = clauses
+
+    def matches(self, row: tuple[str, ...]) -> bool:
+        return all(c.matches(row) for c in self.clauses)
+
+
+class FilterExpression:
+    """Parsed filter expression supporting OR-of-AND groups.
+
+    Syntax examples:
+        Plain text:        ``ReadProperty``         → global substring
+        Key:value:         ``src:192.168.1.1``      → field contains value
+        Multiple k:v:      ``src:192.168 service:Read`` → AND
+        Operator:          ``src == 192.168.1.1``   → exact match
+        Contains:          ``service contains Read`` → substring on field
+        AND:               ``src == 1.2.3.4 && service contains Read``
+        OR:                ``service == I-Am || service == Who-Is``
+        Mixed:             ``src == 1.2.3.4 && pdu == Unconfirmed-REQ || dst == 10.0.0.255``
+
+    Precedence: ``&&`` binds tighter than ``||``.
+    Plain text with no recognised operator/field falls back to global substring.
+    """
+
+    __slots__ = ("_groups",)
+
+    def __init__(self, groups: list[_AndGroup]) -> None:
+        self._groups = groups
+
+    def matches(self, row: tuple[str, ...]) -> bool:
+        """True if any OR group matches (i.e. groups are ORed)."""
+        return any(g.matches(row) for g in self._groups)
+
+    @classmethod
+    def parse(cls, text: str) -> FilterExpression | None:
+        """Parse a filter string into a FilterExpression.
+
+        Returns None if the text is empty (meaning "show everything").
+        """
+        text = text.strip()
+        if not text:
+            return None
+
+        # Split on || first (lower precedence)
+        or_parts = re.split(r"\s*\|\|\s*", text)
+        groups: list[_AndGroup] = []
+
+        for or_part in or_parts:
+            or_part = or_part.strip()
+            if not or_part:
+                continue
+
+            # Split on && (higher precedence)
+            and_parts = re.split(r"\s*&&\s*", or_part)
+            clauses: list[_FilterClause | _SubstringFilter] = []
+
+            for part in and_parts:
+                part = part.strip()
+                if not part:
+                    continue
+
+                clause = cls._parse_clause(part)
+                if clause is not None:
+                    clauses.append(clause)
+
+            if clauses:
+                groups.append(_AndGroup(clauses))
+
+        if not groups:
+            return None
+
+        return cls(groups)
+
+    @classmethod
+    def _parse_clause(cls, text: str) -> _FilterClause | _SubstringFilter | _MultiClause | None:
+        """Parse a single clause — tries operator syntax, then key:value, then substring."""
+        # 1. Try operator-based: field == value, field != value, field contains value
+        m = _CLAUSE_RE.match(text)
+        if m:
+            field_name = m.group(1).lower()
+            op = m.group(2).lower()
+            value = m.group(3)
+            idx = FILTER_FIELD_ALIASES.get(field_name)
+            if idx is not None:
+                return _FilterClause(idx, op, value)
+            # Unknown field name → treat entire text as substring
+            return _SubstringFilter(text)
+
+        # 2. Try key:value pairs (may have multiple space-separated tokens)
+        kv_clauses: list[_FilterClause | _SubstringFilter] = []
+        remaining_tokens: list[str] = []
+        for token in text.split():
+            kv_m = _KV_RE.match(token)
+            if kv_m:
+                field_name = kv_m.group(1).lower()
+                value = kv_m.group(2)
+                idx = FILTER_FIELD_ALIASES.get(field_name)
+                if idx is not None:
+                    kv_clauses.append(_FilterClause(idx, "contains", value))
+                    continue
+            remaining_tokens.append(token)
+
+        if kv_clauses:
+            if remaining_tokens:
+                kv_clauses.append(_SubstringFilter(" ".join(remaining_tokens)))
+            if len(kv_clauses) == 1:
+                return kv_clauses[0]
+            return _MultiClause(kv_clauses)
+
+        # 3. Fallback: plain text substring
+        return _SubstringFilter(text)
+
+
+class _MultiClause:
+    """Helper for multiple key:value pairs in a single AND segment."""
+
+    __slots__ = ("clauses",)
+
+    def __init__(self, clauses: list[_FilterClause | _SubstringFilter]) -> None:
+        self.clauses = clauses
+
+    def matches(self, row: tuple[str, ...]) -> bool:
+        return all(c.matches(row) for c in self.clauses)
+
+
+# ---------------------------------------------------------------------------
+# Filter Help Modal Screen
+# ---------------------------------------------------------------------------
+
+_FILTER_HELP_TEXT = """\
+[b]Packet Filter Reference[/b]
+
+[b]Fields[/b]
+  src  (source, ip.src)            Source IP address
+  dst  (dest, destination,         Destination IP address
+       ip.dst)
+  pdu  (pdu_type, type)            PDU type name
+  service  (svc)                   BACnet service name
+  object  (obj)                    Object type and instance
+  size  (length, len)              Packet size in bytes
+
+[b]Operators[/b]
+  ==              Exact match         src == 192.168.1.10
+  !=              Not equal           dst != 255.255.255.255
+  contains        Substring match     service contains Read
+  &&              AND                 src == 10.0.0.5 && pdu == Confirmed-REQ
+  ||              OR                  service == Who-Is || service == I-Am
+
+[b]Key:Value Shorthand[/b]
+  src:192.168.1.10                    Same as: src contains 192.168.1.10
+  service:Read                        Same as: service contains Read
+  src:10.0 service:Read               Multiple = implicit AND
+
+[b]Plain Text[/b]
+  ReadProperty                        Searches all columns (backward compatible)
+  192.168                             Partial match anywhere
+
+[b]Examples[/b]
+  src == 192.168.1.10                          Packets from specific IP
+  service == ReadProperty                      Only ReadProperty requests
+  service == Who-Is || service == I-Am         All discovery traffic
+  dst:255                                      Broadcast packets
+  pdu == Confirmed-REQ                         Confirmed requests only
+  src == 10.0.0.5 && service contains Read     ReadProperty from a source
+  obj contains Device-200                      Specific device object
+  src != 10.0.0.99                             Hide a noisy source
+  obj contains AnalogInput                     All analog input objects
+
+  Precedence: && binds tighter than ||
+"""
+
+
+class FilterHelpScreen(ModalScreen):
+    """Modal popup showing packet filter syntax help.
+
+    Displayed as an overlay — does not interrupt capture or other background tasks.
+    Press Escape or click Close to dismiss.
+    """
+
+    DEFAULT_CSS = """
+    FilterHelpScreen {
+        align: center middle;
+    }
+    #filter-help-container {
+        width: 92;
+        max-height: 85%;
+        background: $surface;
+        border: thick $accent;
+        padding: 1 2;
+    }
+    #filter-help-title {
+        dock: top;
+        width: 100%;
+        height: 1;
+        background: $accent;
+        color: $text;
+        text-style: bold;
+        content-align: center middle;
+        padding: 0 1;
+    }
+    #filter-help-body {
+        height: 1fr;
+        scrollbar-size: 1 1;
+    }
+    #filter-help-close-row {
+        dock: bottom;
+        height: 3;
+        align: center middle;
+    }
+    """
+
+    BINDINGS = [("escape", "dismiss", "Close")]
+
+    def compose(self) -> ComposeResult:
+        from textual.containers import Vertical
+
+        with Vertical(id="filter-help-container"):
+            yield Label(" Filter Help", id="filter-help-title")
+            with VerticalScroll(id="filter-help-body"):
+                yield Static(_FILTER_HELP_TEXT, id="filter-help-content")
+            with Horizontal(id="filter-help-close-row"):
+                yield Button("Close", variant="primary", id="btn-filter-help-close")
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "btn-filter-help-close":
+            self.dismiss()
+
 
 # ---------------------------------------------------------------------------
 # Packet Table (left panel)
@@ -43,12 +346,18 @@ class PacketTable(Static):
         self.max_rows = max_rows
         self._all_rows: deque[tuple[str, ...]] = deque(maxlen=max_rows)
         self._displayed_keys: list[object] = []
+        self._filter_expr: FilterExpression | None = None
         self._filter_text: str = ""
         self._packet_count = 0
 
     def compose(self) -> ComposeResult:
         yield Label(" Recent Packets", classes="panel-title")
-        yield Input(placeholder="Filter packets...", id="packet-filter")
+        with Horizontal(id="filter-row"):
+            yield Input(
+                placeholder="Filter: src == x.x.x.x && service contains Read | plain text",
+                id="packet-filter",
+            )
+            yield Button("?", id="btn-filter-help", classes="filter-help-btn")
         table = DataTable(id="packet-table")
         table.cursor_type = "row"
         table.zebra_stripes = True
@@ -61,7 +370,8 @@ class PacketTable(Static):
     def on_input_changed(self, event: Input.Changed) -> None:
         """Live-filter the table when the user types in the filter field."""
         if event.input.id == "packet-filter":
-            self._filter_text = event.value.strip().lower()
+            self._filter_text = event.value.strip()
+            self._filter_expr = FilterExpression.parse(self._filter_text)
             self._rebuild_table()
 
     def add_packet(
@@ -108,11 +418,15 @@ class PacketTable(Static):
             table.scroll_end(animate=False)
 
     def _matches_filter(self, row: tuple[str, ...]) -> bool:
-        """Check if any column in the row contains the filter text."""
-        if not self._filter_text:
+        """Evaluate the current filter expression against a row.
+
+        Supports Wireshark-style field filters (src == x, service contains y),
+        key:value shorthand (src:x), boolean operators (&& / ||), and plain
+        text substring fallback.
+        """
+        if self._filter_expr is None:
             return True
-        combined = " ".join(row).lower()
-        return self._filter_text in combined
+        return self._filter_expr.matches(row)
 
     def _rebuild_table(self) -> None:
         """Clear and repopulate the table based on the current filter."""
@@ -134,6 +448,7 @@ class PacketTable(Static):
         table.clear()
         self._all_rows.clear()
         self._displayed_keys.clear()
+        self._filter_expr = None
         self._filter_text = ""
         self._packet_count = 0
 

@@ -35,6 +35,7 @@ from .widgets import (
     CommandsPanel,
     DeviceListPanel,
     DevicePanel,
+    FilterHelpScreen,
     PacketDetailPanel,
     PacketTable,
     SettingsPanel,
@@ -390,6 +391,8 @@ class NetSightApp(App):
             self._reset_settings_to_defaults()
         elif event.button.id == "btn-send-whois":
             self._send_whois()
+        elif event.button.id == "btn-filter-help":
+            self.push_screen(FilterHelpScreen())
 
     def _apply_and_save_settings(self) -> None:
         """Read values from the settings panel, apply to detector, and save to file."""

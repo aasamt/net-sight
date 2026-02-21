@@ -459,6 +459,225 @@ class TestSettingsTab:
 
 
 # ---------------------------------------------------------------------------
+# Filter Expression Parser Tests
+# ---------------------------------------------------------------------------
+
+from backend.tui.widgets import FilterExpression
+
+
+class TestFilterExpression:
+    """Tests for the Wireshark-style filter expression parser."""
+
+    # Sample row: (#, Source, Destination, PDU Type, Service, Object, Size)
+    ROW_A = ("1", "192.168.1.10", "192.168.1.255", "Unconfirmed-REQ", "Who-Is", "", "25")
+    ROW_B = ("2", "10.0.0.5", "10.0.0.1", "Confirmed-REQ", "ReadProperty", "Device-200", "64")
+    ROW_C = ("3", "192.168.1.20", "192.168.1.10", "Complex-ACK", "ReadProperty-ACK", "AnalogInput-1", "128")
+    ROW_D = ("4", "10.0.0.5", "192.168.1.255", "Unconfirmed-REQ", "I-Am", "Device-300", "42")
+
+    # -- Empty / None --
+
+    def test_empty_filter_returns_none(self) -> None:
+        assert FilterExpression.parse("") is None
+        assert FilterExpression.parse("   ") is None
+
+    # -- Plain text fallback (backward compatible) --
+
+    def test_plain_text_substring(self) -> None:
+        expr = FilterExpression.parse("ReadProperty")
+        assert expr is not None
+        assert expr.matches(self.ROW_B)
+        assert expr.matches(self.ROW_C)  # "ReadProperty-ACK" contains "ReadProperty"
+        assert not expr.matches(self.ROW_A)
+
+    def test_plain_text_case_insensitive(self) -> None:
+        expr = FilterExpression.parse("readproperty")
+        assert expr is not None
+        assert expr.matches(self.ROW_B)
+        assert expr.matches(self.ROW_C)
+
+    def test_plain_text_partial_ip(self) -> None:
+        expr = FilterExpression.parse("192.168")
+        assert expr is not None
+        assert expr.matches(self.ROW_A)
+        assert not expr.matches(self.ROW_B)  # src is 10.0.0.5, dst is 10.0.0.1
+
+    # -- Field == value (exact match) --
+
+    def test_field_equals_src(self) -> None:
+        expr = FilterExpression.parse("src == 192.168.1.10")
+        assert expr is not None
+        assert expr.matches(self.ROW_A)
+        assert not expr.matches(self.ROW_B)
+
+    def test_field_equals_dst(self) -> None:
+        expr = FilterExpression.parse("dst == 10.0.0.1")
+        assert expr is not None
+        assert expr.matches(self.ROW_B)
+        assert not expr.matches(self.ROW_A)
+
+    def test_field_equals_service(self) -> None:
+        expr = FilterExpression.parse("service == ReadProperty")
+        assert expr is not None
+        assert expr.matches(self.ROW_B)
+        assert not expr.matches(self.ROW_C)  # "ReadProperty-ACK" != "ReadProperty"
+
+    def test_field_equals_pdu(self) -> None:
+        expr = FilterExpression.parse("pdu == Unconfirmed-REQ")
+        assert expr is not None
+        assert expr.matches(self.ROW_A)
+        assert expr.matches(self.ROW_D)
+        assert not expr.matches(self.ROW_B)
+
+    def test_field_equals_case_insensitive(self) -> None:
+        expr = FilterExpression.parse("service == readproperty")
+        assert expr is not None
+        assert expr.matches(self.ROW_B)
+
+    def test_field_equals_size(self) -> None:
+        expr = FilterExpression.parse("size == 64")
+        assert expr is not None
+        assert expr.matches(self.ROW_B)
+        assert not expr.matches(self.ROW_A)
+
+    # -- Field != value (not equal) --
+
+    def test_field_not_equals(self) -> None:
+        expr = FilterExpression.parse("src != 10.0.0.5")
+        assert expr is not None
+        assert expr.matches(self.ROW_A)  # 192.168.1.10
+        assert not expr.matches(self.ROW_B)  # 10.0.0.5
+
+    # -- Field contains value (substring) --
+
+    def test_field_contains(self) -> None:
+        expr = FilterExpression.parse("service contains Read")
+        assert expr is not None
+        assert expr.matches(self.ROW_B)  # ReadProperty
+        assert expr.matches(self.ROW_C)  # ReadProperty-ACK
+        assert not expr.matches(self.ROW_A)  # Who-Is
+
+    def test_field_contains_object(self) -> None:
+        expr = FilterExpression.parse("obj contains Device")
+        assert expr is not None
+        assert expr.matches(self.ROW_B)  # Device-200
+        assert expr.matches(self.ROW_D)  # Device-300
+        assert not expr.matches(self.ROW_C)  # AnalogInput-1
+        assert not expr.matches(self.ROW_A)  # empty
+
+    # -- key:value shorthand --
+
+    def test_kv_shorthand_single(self) -> None:
+        expr = FilterExpression.parse("src:192.168.1.10")
+        assert expr is not None
+        assert expr.matches(self.ROW_A)
+        assert not expr.matches(self.ROW_B)
+
+    def test_kv_shorthand_partial(self) -> None:
+        """key:value uses 'contains' so partial matches work."""
+        expr = FilterExpression.parse("src:192.168")
+        assert expr is not None
+        assert expr.matches(self.ROW_A)
+        assert expr.matches(self.ROW_C)
+        assert not expr.matches(self.ROW_B)
+
+    def test_kv_shorthand_multiple_and(self) -> None:
+        """Multiple key:value pairs are implicitly ANDed."""
+        expr = FilterExpression.parse("src:10.0.0.5 service:I-Am")
+        assert expr is not None
+        assert expr.matches(self.ROW_D)  # src=10.0.0.5, service=I-Am
+        assert not expr.matches(self.ROW_B)  # src=10.0.0.5 but service=ReadProperty
+
+    # -- && (AND) --
+
+    def test_and_operator(self) -> None:
+        expr = FilterExpression.parse("src == 10.0.0.5 && service == ReadProperty")
+        assert expr is not None
+        assert expr.matches(self.ROW_B)
+        assert not expr.matches(self.ROW_D)  # same src but service=I-Am
+
+    def test_and_three_clauses(self) -> None:
+        expr = FilterExpression.parse("src == 10.0.0.5 && pdu == Confirmed-REQ && obj contains Device")
+        assert expr is not None
+        assert expr.matches(self.ROW_B)
+        assert not expr.matches(self.ROW_D)
+
+    # -- || (OR) --
+
+    def test_or_operator(self) -> None:
+        expr = FilterExpression.parse("service == Who-Is || service == I-Am")
+        assert expr is not None
+        assert expr.matches(self.ROW_A)  # Who-Is
+        assert expr.matches(self.ROW_D)  # I-Am
+        assert not expr.matches(self.ROW_B)  # ReadProperty
+
+    # -- Mixed && and || --
+
+    def test_and_or_precedence(self) -> None:
+        """&& binds tighter than || — (A && B) || C."""
+        expr = FilterExpression.parse(
+            "src == 10.0.0.5 && service == ReadProperty || service == Who-Is"
+        )
+        assert expr is not None
+        assert expr.matches(self.ROW_B)  # matches first group (src AND service)
+        assert expr.matches(self.ROW_A)  # matches second group (Who-Is)
+        assert not expr.matches(self.ROW_D)  # src=10.0.0.5 but service=I-Am, not Who-Is
+
+    # -- Field aliases --
+
+    def test_alias_source(self) -> None:
+        expr = FilterExpression.parse("source == 192.168.1.10")
+        assert expr is not None
+        assert expr.matches(self.ROW_A)
+
+    def test_alias_ip_src(self) -> None:
+        expr = FilterExpression.parse("ip.src == 192.168.1.10")
+        assert expr is not None
+        assert expr.matches(self.ROW_A)
+
+    def test_alias_dest(self) -> None:
+        expr = FilterExpression.parse("dest == 10.0.0.1")
+        assert expr is not None
+        assert expr.matches(self.ROW_B)
+
+    def test_alias_ip_dst(self) -> None:
+        expr = FilterExpression.parse("ip.dst == 10.0.0.1")
+        assert expr is not None
+        assert expr.matches(self.ROW_B)
+
+    def test_alias_length(self) -> None:
+        expr = FilterExpression.parse("length == 128")
+        assert expr is not None
+        assert expr.matches(self.ROW_C)
+
+    def test_alias_len(self) -> None:
+        expr = FilterExpression.parse("len == 128")
+        assert expr is not None
+        assert expr.matches(self.ROW_C)
+
+    def test_alias_pdu_type(self) -> None:
+        expr = FilterExpression.parse("pdu_type == Complex-ACK")
+        assert expr is not None
+        assert expr.matches(self.ROW_C)
+
+    # -- Unknown field → falls back to substring --
+
+    def test_unknown_field_falls_back(self) -> None:
+        """An unknown field name in operator syntax falls back to substring."""
+        expr = FilterExpression.parse("bogus == ReadProperty")
+        assert expr is not None
+        # The entire text "bogus == ReadProperty" is treated as a substring search
+        assert not expr.matches(self.ROW_A)
+        # It won't match because no column contains "bogus == ReadProperty"
+
+    def test_unknown_field_kv_falls_back(self) -> None:
+        """An unknown field in key:value is treated as plain token."""
+        expr = FilterExpression.parse("unknown:foo")
+        assert expr is not None
+        # Falls back to substring "unknown:foo" across all columns
+        assert not expr.matches(self.ROW_A)
+
+
+# ---------------------------------------------------------------------------
 # Run standalone
 # ---------------------------------------------------------------------------
 

@@ -1,7 +1,7 @@
 # NetSight — Session Progress & Handoff
 
 > **Last Updated:** February 20, 2026
-> **Status:** Phase 5i Complete — Commands Tab with Who-Is Broadcast (197 tests passing)
+> **Status:** Phase 5j Complete — Wireshark-Style Packet Filter & Help Popup (226 tests passing)
 
 ---
 
@@ -383,6 +383,37 @@ After reading these files, tell me what has been completed and what the next imp
 
 ---
 
+### Phase 5j: Wireshark-Style Packet Filter & Help Popup
+- [x] Implement `FilterExpression` parser in `backend/tui/widgets.py`
+  - Regex-based tokenizer parses filter text into OR-of-AND expression tree
+  - Classes: `_FilterClause` (field/operator/value), `_SubstringFilter` (plain text), `_AndGroup`, `_MultiClause` (OR of AND groups)
+  - Operators: `==` (exact match), `!=` (not equal), `contains` (substring) — all case-insensitive
+  - `&&` (AND) and `||` (OR) logical connectives with correct precedence (AND binds tighter)
+  - Key:value shorthand syntax (e.g., `src:192.168`) as alias for `field contains value`
+  - Plain text fallback: unrecognized input searches across all visible columns
+  - Field aliases: `src`, `dst`, `pdu`, `service`, `object`, `size` mapped to row tuple indices
+- [x] Integrate `FilterExpression` into `PacketTable` widget
+  - `on_input_changed` parses filter text into `self._filter_expr` (or None on empty/invalid)
+  - `_matches_filter()` delegates to `FilterExpression.matches(row)` for each row
+  - Filter input placeholder updated to show Wireshark-style syntax hint
+- [x] Add `FilterHelpScreen` modal popup (`ModalScreen`)
+  - Displays comprehensive filter syntax reference (fields, operators, examples)
+  - Two-column layout: first column (field/syntax), second column (description/example)
+  - Close button and Escape key binding to dismiss
+  - Non-blocking overlay — does not interrupt capture
+  - Modal width: 92 columns for readability
+- [x] Add `?` help button next to filter input in `PacketTable.compose()`
+  - `#filter-row` Horizontal layout: `#packet-filter` Input (1fr) + `.filter-help-btn` Button (width 5)
+  - Button press triggers `push_screen(FilterHelpScreen())` in `app.py`
+- [x] Add filter-row and modal CSS to `backend/tui/styles.tcss`
+- [x] Add 29 filter expression tests in `TestFilterExpression` class
+  - Tests cover: plain text, field==value, field!=value, field contains value, key:value shorthand, &&, ||, precedence, all field aliases, unknown field fallback, empty filter
+- [x] All 226 tests pass (197 existing + 29 new) — no regressions
+
+**Requirement coverage:** FR-INS-04, FR-FIL-01 through FR-FIL-06
+
+---
+
 ### Phase 6: FastAPI Server & WebSocket Streaming
 - [ ] Extend `backend/main.py` `--serve` mode — FastAPI app with uvicorn on `127.0.0.1:8765`
   - CORS middleware for future Electron renderer
@@ -532,6 +563,8 @@ After reading these files, tell me what has been completed and what the next imp
 | 14 | 2026-02-17 | TabbedContent for multi-view TUI (not single-page scroll) | Multiple apps, screen switching, manual tab bar | Textual built-in TabbedContent/TabPane — zero custom plumbing, keyboard-navigable, auto-styled; separate concerns (traffic monitoring vs device inventory) into distinct views |
 | 15 | 2026-02-20 | Who-Is sender uses raw UDP socket (not Scapy send) | Scapy send(), BACpypes3 WHO-IS service | Simpler, no additional root requirement for broadcast send; full control over BVLC/NPDU/APDU byte construction; consistent with project's manual byte-level parser approach |
 | 16 | 2026-02-20 | Commands tab live-capture-only (hidden for pcap replay) | Always visible with disabled button, separate CLI flag | Sending packets during pcap replay is nonsensical; conditional `compose()` is cleaner than disabling UI elements |
+| 17 | 2026-02-20 | Wireshark-style filter expression parser with OR-of-AND tree | Simple substring filter, regex-based filter, external filter library | Structured expression tree enables field-specific matching with operators; regex tokenizer is lightweight; plain text fallback preserves backward compatibility |
+| 18 | 2026-02-20 | ModalScreen for filter help popup (not inline tooltip or panel) | Static help text in sidebar, tooltip on hover, separate help tab | ModalScreen is non-blocking overlay; dismissible with Escape; keeps filter context visible beneath; large enough for comprehensive reference |
 
 ---
 
@@ -572,6 +605,7 @@ After reading these files, tell me what has been completed and what the next imp
 | 2026-02-19 | Phase 5h complete — TUI Settings tab: SettingsPanel widget, save/reset buttons, live detector updates, save_settings() TOML writer, get_defaults(); 194 tests passing |
 | 2026-02-19 | Settings restructured to two-file architecture: settings_user.toml (active) + settings_default.toml (immutable defaults); reset_to_defaults() copies defaults to user file; 197 tests passing |
 | 2026-02-20 | Phase 5i complete — Commands tab with Who-Is broadcast sender; whois_sender.py (packet builder + UDP sender); CommandsPanel widget with range inputs, send button, command log; live-capture-only tab; 197 tests passing |
+| 2026-02-20 | Phase 5j complete — Wireshark-style packet filter (FilterExpression parser with field==value, !=, contains, &&, ||, key:value shorthand, plain text fallback); FilterHelpScreen modal popup with ? button; 226 tests passing |
 
 ---
 
